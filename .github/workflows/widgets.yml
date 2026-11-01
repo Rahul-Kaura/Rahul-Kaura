@@ -1,0 +1,49 @@
+name: Profile widgets
+
+on:
+  schedule:
+    - cron: "47 1 * * *"
+  workflow_dispatch:
+  push:
+    paths: [.github/workflows/widgets.yml]
+
+permissions:
+  contents: write
+
+concurrency: widgets
+
+jobs:
+  snake:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Platane/snk@v3
+        with:
+          github_user_name: ${{ github.repository_owner }}
+          outputs: |
+            dist/snake.svg
+            dist/snake-dark.svg?palette=github-dark
+      - name: Commit the snake
+        shell: bash
+        run: |
+          git add dist
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --quiet --message "widgets: redraw the snake"
+          git pull --rebase --quiet && git push --quiet
+
+  summary-cards:
+    needs: snake
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: vn7n24fzkq/github-profile-summary-cards@release
+        env:
+          GITHUB_TOKEN: ${{ secrets.SUMMARY_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+        with:
+          USERNAME: ${{ github.repository_owner }}
+          BRANCH_NAME: main
+          TIME_ZONE: America/Los_Angeles
+          THEME: tokyonight
+          ANIMATION: sequence
