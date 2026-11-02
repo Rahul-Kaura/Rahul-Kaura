@@ -6,7 +6,7 @@ on:
     - cron: "20 0 * * *"
   workflow_dispatch:
   push:
-    paths: [.github/workflows/koi.yml, scripts/pond.py]
+    paths: [.github/workflows/koi.yml, scripts/pond.py, scripts/gotham_koi.py]
 
 permissions:
   contents: write
@@ -27,26 +27,15 @@ jobs:
           repository: yalongwastaken/git-koi
           ref: v1.0.2
           path: _gitkoi
-      - name: Always cruise
-        shell: python
-        run: |
-          import re
-          p = "_gitkoi/src/behavior.rs"
-          s = open(p).read()
-          s, n = re.subn(
-              r"(pub fn select_behavior\(koi_development: &KoiDevelopment\) -> Behavior \{)",
-              r"\1\n    let _ = koi_development;\n    return Behavior::Cruise;\n    #[allow(unreachable_code)]",
-              s,
-          )
-          assert n == 1, "select_behavior not found"
-          open(p, "w").write(s)
+      - name: Black-and-gold coat, always cruise
+        run: python3 scripts/gotham_koi.py _gitkoi
       - name: Cache the build
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             _gitkoi/target
-          key: gitkoi-v1.0.2-cruise-${{ runner.os }}
+          key: gitkoi-v1.0.2-gotham-${{ hashFiles('scripts/gotham_koi.py') }}-${{ runner.os }}
       - name: Build git-koi
         run: cargo build --release --locked --manifest-path _gitkoi/Cargo.toml
       - name: Draw the koi
@@ -55,7 +44,7 @@ jobs:
         run: |
           bin=_gitkoi/target/release/git-koi
           $bin collect "${{ github.repository_owner }}" --output "$RUNNER_TEMP/snapshot.json"
-          $bin render "$RUNNER_TEMP/snapshot.json" --output-dir koi --body tea
+          $bin render "$RUNNER_TEMP/snapshot.json" --output-dir koi --body black
       - name: Put the koi in its pond
         run: |
           python3 -m pip install --quiet --break-system-packages pillow numpy

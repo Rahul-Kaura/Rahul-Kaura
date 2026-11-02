@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://readme-typing-svg.demolab.com?font=Orbitron&weight=700&size=22&duration=3000&pause=900&color=E8925B&center=true&vCenter=true&width=900&height=50&letterSpacing=2px&lines=INFRASTRUCTURE+%E2%80%A2+OBSERVABILITY+%E2%80%A2+AI+AGENTS;RAG+%E2%80%A2+DOCUMENT+PARSING+%E2%80%A2+EVALS;SHIPPING+AI+INTO+REAL+ENVIRONMENTS" alt="Focus areas" />
+  <img src="https://readme-typing-svg.demolab.com?font=Orbitron&weight=700&size=22&duration=3000&pause=900&color=E3B341&center=true&vCenter=true&width=900&height=50&letterSpacing=2px&lines=INFRASTRUCTURE+%E2%80%A2+OBSERVABILITY+%E2%80%A2+AI+AGENTS;RAG+%E2%80%A2+DOCUMENT+PARSING+%E2%80%A2+EVALS;SHIPPING+AI+INTO+REAL+ENVIRONMENTS" alt="Focus areas" />
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@
 ## Tech
 
 <p align="center">
-  <img src="https://skillicons.dev/icons?i=py,ts,js,react,nodejs,docker,kubernetes,postgres,git,linux,githubactions&perline=11" alt="Tech stack" />
+  <img src="https://skillicons.dev/icons?i=py,ts,js,react,nodejs,docker,kubernetes,postgres,git,linux,githubactions&perline=11&theme=dark" alt="Tech stack" />
 </p>
 
 ## Research
@@ -47,32 +47,29 @@ Technical reports from my production work. Each one is grounded in published res
 ## Activity
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="dist/snake-dark.svg" />
-    <img src="dist/snake.svg" width="100%" alt="Snake eating my contribution graph" />
-  </picture>
+  <img src="dist/snake.svg" width="100%" alt="Snake eating my contribution graph" />
 </p>
 
 <p align="center">
-  <img src="profile-summary-card-output/tokyonight/0-profile-details.svg" width="100%" alt="Profile details" />
+  <img src="profile-summary-card-output/great_gatsby/0-profile-details.svg" width="100%" alt="Profile details" />
 </p>
 
 <p align="center">
-  <img src="profile-summary-card-output/tokyonight/1-repos-per-language.svg" width="49%" alt="Repos per language" />
-  <img src="profile-summary-card-output/tokyonight/2-most-commit-language.svg" width="49%" alt="Most commit language" />
+  <img src="profile-summary-card-output/great_gatsby/1-repos-per-language.svg" width="49%" alt="Repos per language" />
+  <img src="profile-summary-card-output/great_gatsby/2-most-commit-language.svg" width="49%" alt="Most commit language" />
 </p>
 
 <p align="center">
-  <img src="profile-summary-card-output/tokyonight/3-stats.svg" width="49%" alt="Stats" />
-  <img src="profile-summary-card-output/tokyonight/4-productive-time.svg" width="49%" alt="Productive time" />
+  <img src="profile-summary-card-output/great_gatsby/3-stats.svg" width="49%" alt="Stats" />
+  <img src="profile-summary-card-output/great_gatsby/4-productive-time.svg" width="49%" alt="Productive time" />
 </p>
 
 <p align="center">
-  <img src="https://streak-stats.demolab.com?user=Rahul-Kaura&theme=tokyonight&hide_border=true&card_width=900" width="100%" alt="GitHub streak" />
+  <img src="https://streak-stats.demolab.com?user=Rahul-Kaura&background=0A0B10&border=E3B341&stroke=3D2E0A&ring=E3B341&fire=F2C14E&currStreakNum=F2C14E&sideNums=E3B341&currStreakLabel=E3B341&sideLabels=C9B37A&dates=8A7A55&card_width=900" width="100%" alt="GitHub streak" />
 </p>
 
 <p align="center">
-  <img src="https://github-readme-activity-graph.vercel.app/graph?username=Rahul-Kaura&theme=tokyo-night&hide_border=true&area=true" width="100%" alt="Contribution graph" />
+  <img src="https://github-readme-activity-graph.vercel.app/graph?username=Rahul-Kaura&bg_color=0a0b10&color=c9b37a&title_color=e3b341&line=e3b341&point=fff1b8&area=true&area_color=e3b341&hide_border=true" width="100%" alt="Contribution graph" />
 </p>
 
 <p align="center"><sub>Koi by <a href="https://github.com/yalongwastaken/git-koi">git-koi</a> · snake by <a href="https://github.com/Platane/snk">snk</a> · cards by <a href="https://github.com/vn7n24fzkq/github-profile-summary-cards">github-profile-summary-cards</a></sub></p>

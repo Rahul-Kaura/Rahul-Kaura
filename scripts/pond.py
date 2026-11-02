@@ -1,4 +1,4 @@
-"""Render the koi into an illuminated garden pond.
+"""Render the koi into a moonlit night pond (Gotham night theme).
 
 Usage: python pond.py koi/koi.gif koi/pond.webp
 
@@ -105,8 +105,8 @@ def pond_shape(W):
 def garden(W):
     n = fbm(W, 3)
     n2 = fbm(W, 9, octaves=(16, 32, 64), weights=(0.5, 0.3, 0.2))
-    g = np.stack([0.06 + 0.10 * n, 0.16 + 0.22 * n, 0.08 + 0.10 * n], -1)
-    g += (n2[..., None] - 0.5) * 0.08
+    g = np.stack([0.02 + 0.03 * n, 0.04 + 0.07 * n, 0.05 + 0.07 * n], -1)
+    g += (n2[..., None] - 0.5) * 0.04
     img = Image.fromarray(np.clip(g * 255, 0, 255).astype(np.uint8)).convert("RGBA")
     layer = rgba_layer(W)
     d = ImageDraw.Draw(layer)
@@ -115,7 +115,7 @@ def garden(W):
         L = rng.uniform(18, 46)
         a = rng.uniform(0, math.pi * 2)
         shade = rng.uniform(0.6, 1.25)
-        col = (int(48 * shade), int(120 * shade), int(58 * shade), 235)
+        col = (int(14 * shade), int(42 * shade), int(36 * shade), 235)
         pts = []
         for k in range(14):
             u = k / 13
@@ -124,16 +124,16 @@ def garden(W):
         ca, sa = math.cos(a), math.sin(a)
         d.polygon([((x + px * ca - py * sa) * SS, (y + px * sa + py * ca) * SS) for px, py in pts], fill=col)
         d.line([(x * SS, y * SS), ((x + L * ca) * SS, (y + L * sa) * SS)],
-               fill=(int(90 * shade), int(170 * shade), int(90 * shade), 140), width=SS)
+               fill=(int(40 * shade), int(80 * shade), int(66 * shade), 140), width=SS)
     img.alpha_composite(down(layer, W).filter(ImageFilter.GaussianBlur(0.4)))
     return arr(img)
 
 
 def water_base(W, d, r):
     k = np.clip(d / r, 0, 1)[..., None]
-    deep = np.array([0.01, 0.17, 0.24])
-    shallow = np.array([0.10, 0.56, 0.60])
-    edge = np.array([0.36, 0.78, 0.66])
+    deep = np.array([0.02, 0.06, 0.11])
+    shallow = np.array([0.08, 0.22, 0.30])
+    edge = np.array([0.12, 0.28, 0.34])
     kk = k ** 1.6
     col = deep * (1 - kk) + shallow * kk
     e = np.clip((k - 0.85) / 0.15, 0, 1)
@@ -141,7 +141,7 @@ def water_base(W, d, r):
     peb = fbm(W, 21, octaves=(24, 48, 96), weights=(0.4, 0.35, 0.25))
     col = col * (0.82 + 0.3 * peb[..., None])
     sand = fbm(W, 33, octaves=(6, 12), weights=(0.6, 0.4))
-    col += (sand[..., None] - 0.5) * np.array([0.08, 0.06, 0.02])
+    col += (sand[..., None] - 0.5) * np.array([0.03, 0.03, 0.04])
     return col.astype(np.float32)
 
 
@@ -164,7 +164,7 @@ def rock_layer(W):
         rocks.append((cx + dist * math.cos(a), cy + dist * math.sin(a), rr, rng.uniform(0.6, 0.9), rng.uniform(0, math.pi)))
         a += rr * 1.4 / (base + rr * 1.5)
     rocks.sort(key=lambda r: -math.hypot(r[0] - cx, r[1] - cy))
-    light = np.array([-0.55, -0.65, 0.52])
+    light = np.array([0.55, -0.65, 0.52])
     light /= np.linalg.norm(light)
     yy, xx = np.mgrid[0:W, 0:W].astype(np.float32)
     for (x, y, rr, sq, rot) in rocks:
@@ -183,11 +183,11 @@ def rock_layer(W):
         ny = u * s + v * c
         lam = np.clip(nx * light[0] + ny * light[1] + z * light[2], 0, 1)
         tone = rng.uniform(0.85, 1.1)
-        col = np.array([0.50, 0.48, 0.44]) * tone * (0.25 + 0.95 * lam[..., None])
-        col = col + np.power(lam, 18)[..., None] * 0.25
+        col = np.array([0.20, 0.21, 0.25]) * tone * (0.2 + 1.0 * lam[..., None])
+        col = col + np.power(lam, 18)[..., None] * np.array([0.30, 0.34, 0.42])
         m = moss[y0:y1, x0:x1]
-        mossy = (np.clip((m - 0.48) * 6, 0, 1) * np.clip(-ny * 1.2 + 0.2, 0, 1))[..., None]
-        moss_col = np.array([0.28, 0.48, 0.18]) * (0.5 + 0.7 * lam[..., None])
+        mossy = (np.clip((m - 0.48) * 6, 0, 1) * np.clip(-ny * 1.2 + 0.2, 0, 1))[..., None] * 0.8
+        moss_col = np.array([0.07, 0.15, 0.09]) * (0.5 + 0.8 * lam[..., None])
         col = col * (1 - mossy) + moss_col * mossy
         alpha = ((q < 1) * np.clip((1 - q) * 12, 0, 1))[..., None]
         layer[y0:y1, x0:x1] = over(layer[y0:y1, x0:x1].copy(), np.concatenate([col, alpha], -1))
@@ -223,14 +223,14 @@ def pad_sprite(r, notch, flower):
         rr = r * (1 + 0.03 * math.sin(a * 5))
         pts.append(P(c + rr * math.cos(a), c + rr * math.sin(a)))
     pts.append(P(c, c))
-    d.polygon(pts, fill=(52, 128, 62, 255))
+    d.polygon(pts, fill=(18, 52, 36, 255))
     sheen = rgba_layer(S)
     d = ImageDraw.Draw(sheen)
     for i in range(10):
         f = 1 - i / 10
         rr = r * 0.85 * f
         o = r * 0.15 * (1 - f)
-        d.ellipse([*P(c - rr - o, c - rr - o), *P(c + rr - o, c + rr - o)], fill=(70 + i * 6, 150 + i * 6, 72 + i * 3, 28))
+        d.ellipse([*P(c - rr - o, c - rr - o), *P(c + rr - o, c + rr - o)], fill=(26 + i * 3, 66 + i * 4, 46 + i * 3, 28))
     mask = lay.getchannel("A")
     sheen.putalpha(Image.fromarray(np.minimum(np.asarray(sheen.getchannel("A")), np.asarray(mask))))
     lay.alpha_composite(sheen)
@@ -241,16 +241,16 @@ def pad_sprite(r, notch, flower):
         da = (a - a0 + math.pi) % (2 * math.pi) - math.pi
         if abs(da) < 0.3:
             continue
-        d.line([P(c, c), P(c + r * 0.9 * math.cos(a), c + r * 0.9 * math.sin(a))], fill=(110, 180, 100, 110), width=SS)
+        d.line([P(c, c), P(c + r * 0.9 * math.cos(a), c + r * 0.9 * math.sin(a))], fill=(52, 98, 66, 110), width=SS)
     lay.alpha_composite(veins)
     d = ImageDraw.Draw(lay)
-    d.line(pts[:-1], fill=(30, 90, 44, 255), width=SS)
+    d.line(pts[:-1], fill=(222, 170, 40, 120), width=SS)
     if flower:
         fx, fy = c + r * 0.15, c - r * 0.1
         for ring, (n, L, Wd, base_col, tip) in enumerate([
-            (8, r * 0.75, r * 0.32, (250, 236, 240), (236, 120, 160)),
-            (8, r * 0.58, r * 0.28, (255, 244, 246), (242, 150, 182)),
-            (6, r * 0.38, r * 0.22, (255, 250, 250), (248, 182, 204)),
+            (8, r * 0.75, r * 0.32, (255, 246, 222), (196, 142, 28)),
+            (8, r * 0.58, r * 0.28, (255, 250, 232), (222, 170, 40)),
+            (6, r * 0.38, r * 0.22, (255, 252, 240), (240, 196, 80)),
         ]):
             off = ring * 0.4
             for k in range(n):
@@ -299,7 +299,7 @@ def petals_layer(W, phase):
         pts = [(s / 11 * L - L / 2, math.sin(s / 11 * math.pi) * Wd / 2) for s in range(12)]
         pts += [(u, -w) for (u, w) in reversed(pts)]
         ca, sa = math.cos(ang), math.sin(ang)
-        d.polygon([((x + px * ca - py * sa) * SS, (y + px * sa + py * ca) * SS) for px, py in pts], fill=(246, 178, 200, 235))
+        d.polygon([((x + px * ca - py * sa) * SS, (y + px * sa + py * ca) * SS) for px, py in pts], fill=(232, 186, 70, 235))
     return arr(down(lay, W))
 
 
@@ -313,7 +313,7 @@ def ripples_layer(W, phase):
             a = int(110 * (1 - p) ** 1.5)
             if a <= 2:
                 continue
-            d.ellipse([(x - r) * SS, (y - r * 0.62) * SS, (x + r) * SS, (y + r * 0.62) * SS], outline=(220, 255, 250, a), width=SS)
+            d.ellipse([(x - r) * SS, (y - r * 0.62) * SS, (x + r) * SS, (y + r * 0.62) * SS], outline=(200, 214, 240, int(a * 0.7)), width=SS)
     return arr(down(lay, W))
 
 
@@ -325,10 +325,42 @@ def light_rays(W, phase):
     return rays * np.clip(1.2 - (x + y), 0, 1)
 
 
+MOON_NOISE = None
+
+
+def moon_glint(W, phase):
+    """Moon reflection: a soft glow broken into shimmering horizontal streaks."""
+    y, x = np.mgrid[0:W, 0:W].astype(np.float32)
+    mx, my = W * 0.64, W * 0.34
+    glow = np.exp(-(((x - mx) / 70) ** 2 + ((y - my) / 46) ** 2))
+    streak = 0.5 + 0.5 * np.sin(y * 0.55 + 2 * math.pi * phase * 2 + np.sin(x * 0.05 + 2 * math.pi * phase) * 2 + MOON_NOISE * 9)
+    core = np.exp(-(((x - mx) / 30) ** 2 + ((y - my) / 22) ** 2))
+    return glow * (0.35 + 0.65 * streak ** 3) * 0.5 + core * 0.35
+
+
+FIREFLIES = [(rng.uniform(30, 482), rng.uniform(30, 482), rng.uniform(6, 18), rng.random(), rng.choice([1, 2])) for _ in range(16)]
+
+
+def fireflies(W, phase):
+    lay = Image.new("L", (W, W), 0)
+    core = Image.new("L", (W, W), 0)
+    d, dc = ImageDraw.Draw(lay), ImageDraw.Draw(core)
+    for (x, y, rad, off, k) in FIREFLIES:
+        a = 2 * math.pi * (phase * k + off)
+        fx, fy = x + rad * math.cos(a), y + rad * 0.6 * math.sin(2 * a)
+        tw = 0.5 + 0.5 * math.sin(2 * math.pi * (phase * 3 + off))
+        b = int(255 * (0.25 + 0.75 * tw))
+        d.ellipse([fx - 7, fy - 7, fx + 7, fy + 7], fill=b)
+        dc.ellipse([fx - 1.6, fy - 1.6, fx + 1.6, fy + 1.6], fill=b)
+    glow = np.asarray(lay.filter(ImageFilter.GaussianBlur(6)), np.float32) / 255.0
+    c = np.asarray(core.filter(ImageFilter.GaussianBlur(0.8)), np.float32) / 255.0
+    return glow * 0.55 + c
+
+
 def vignette(W):
     y, x = np.mgrid[0:W, 0:W].astype(np.float32) / W - 0.5
     d = np.sqrt(x * x + y * y) / 0.707
-    return np.clip(1 - 0.55 * d ** 2.2, 0, 1)
+    return np.clip(1 - 0.75 * d ** 2.0, 0, 1)
 
 
 # ---------- main ----------
@@ -339,6 +371,8 @@ def main(src, dst):
     duration = koi.info.get("duration", 70)
     W = koi.size[0]
 
+    global MOON_NOISE
+    MOON_NOISE = fbm(W, 77, octaves=(6, 12, 24), weights=(0.5, 0.3, 0.2))
     SPRITES[:] = [pad_sprite(r, notch, fl) for (_, _, r, notch, fl) in PADS]
 
     d, r = pond_shape(W)
@@ -350,8 +384,10 @@ def main(src, dst):
     rshadow = (np.asarray(rsh, np.float32) / 255.0)[..., None]
     vig = vignette(W)[..., None]
     depth = np.clip(d / r, 0, 1)[..., None]
-    warm = np.array([1.0, 0.92, 0.72], np.float32)
-    caus_col = np.array([0.85, 1.0, 0.95], np.float32)
+    warm = np.array([0.70, 0.80, 1.0], np.float32)
+    caus_col = np.array([1.0, 0.80, 0.40], np.float32)
+    gold = np.array([1.0, 0.76, 0.22], np.float32)
+    moon_col = np.array([0.80, 0.88, 1.0], np.float32)
 
     frames = []
     for i in range(n):
@@ -360,16 +396,19 @@ def main(src, dst):
         k = arr(koi)
 
         cst = looping_caustic(W, phase)[..., None]
-        floor = water + cst * caus_col * (0.22 + 0.22 * depth)
+        floor = water + cst * caus_col * (0.10 + 0.12 * depth)
 
         ka = Image.fromarray((k[..., 3] * 255).astype(np.uint8))
         ksh = np.asarray(ka.filter(ImageFilter.GaussianBlur(5)), np.float32) / 255.0
         ksh = np.roll(np.roll(ksh, 14, 0), 10, 1)[..., None]
-        floor = floor * (1 - 0.55 * ksh)
+        floor = floor * (1 - 0.6 * ksh)
 
-        kc = np.clip(k[..., :3] * 1.04, 0, 1) + cst * 0.07
+        kc = np.clip(k[..., :3] * 1.08, 0, 1) + cst * caus_col * 0.06
         ka3 = k[..., 3:4]
+        aura = np.asarray(ka.filter(ImageFilter.GaussianBlur(9)), np.float32)[..., None] / 255.0
+        floor = floor + aura * gold * 0.22
         scene = floor * (1 - ka3) + kc * ka3
+        scene = scene + moon_glint(W, phase)[..., None] * moon_col * 0.38 * (1 - ka3)
 
         scene = scene * (1 - 0.35 * rshadow * inside)
         pads, pshadow = pads_layer(W, phase)
@@ -380,9 +419,10 @@ def main(src, dst):
         out = bg[..., :3] * (1 - inside) + scene * inside
         out = out * (1 - rocks[..., 3:4]) + rocks[..., :3] * rocks[..., 3:4]
 
-        out = out + light_rays(W, phase)[..., None] * warm * 0.22
+        out = out + light_rays(W, phase)[..., None] * warm * 0.05
         out = out * vig
-        out = (1 - np.exp(-out * 1.35)) / (1 - math.exp(-1.35))
+        out = out + fireflies(W, phase)[..., None] * gold
+        out = (1 - np.exp(-out * 1.6)) / (1 - math.exp(-1.6))
         frames.append(Image.fromarray(np.clip(out * 255, 0, 255).astype(np.uint8)))
 
     frames[0].save(dst, save_all=True, append_images=frames[1:], duration=duration,
