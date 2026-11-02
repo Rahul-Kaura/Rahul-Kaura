@@ -16,7 +16,7 @@ import sys
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
-from traffic import Traffic, ROAD_W, RING_W
+from traffic import Traffic, RING_W
 
 SS = 2  # supersampling for drawn shapes
 rng = random.Random(42)
@@ -359,7 +359,7 @@ def fireflies(W, phase):
     return glow * 0.55 + c
 
 
-CANVAS_FLIES = [(rng.uniform(20, 900), rng.uniform(20, 540), rng.uniform(6, 22), rng.random(), rng.choice([1, 2])) for _ in range(34)]
+CANVAS_FLIES = [(rng.uniform(20, 1180), rng.uniform(20, 740), rng.uniform(6, 22), rng.random(), rng.choice([1, 2])) for _ in range(34)]
 
 
 def fireflies_canvas(CW, CH, phase):
@@ -431,7 +431,8 @@ def city(CW, CH, cx, cy, park_r, traffic):
         for xx in range(int(r.uniform(0, 80)), CW, 120):
             lamps.append((xx, y - SW / 2 + 2, r.random()))
 
-    traffic.draw_roads(img, S2)
+    traffic.draw_ground(img, S2)
+    rmask = traffic.road_mask(CW, CH, pad=6)
     d = ImageDraw.Draw(img)
 
     def split(x0, y0, x1, y1, depth):
@@ -450,9 +451,7 @@ def city(CW, CH, cx, cy, park_r, traffic):
         for (x0, y0, x1, y1) in split(*b, 0):
             bx, by = (x0 + x1) / 2, (y0 + y1) / 2
             probes = [(bx, by), (x0, y0), (x1, y0), (x0, y1), (x1, y1), (bx, y0), (bx, y1), (x0, by), (x1, by)]
-            if min(traffic.corridor_dist(px_, py_) for px_, py_ in probes) < ROAD_W / 2 + 5:
-                continue
-            if min(math.hypot(px_ - cx, py_ - cy) for px_, py_ in probes) < traffic.R + RING_W / 2 + 6:
+            if any(rmask[min(CH - 1, max(0, int(py_))), min(CW - 1, max(0, int(px_)))] for px_, py_ in probes):
                 continue
             roofs.append((x0, y0, x1, y1))
     for (x0, y0, x1, y1) in roofs:
@@ -513,17 +512,42 @@ def city_lights(CW, CH, phase, windows, lamps, xs, ys):
     return g * np.array([1.0, 0.82, 0.45], np.float32) * 0.75 + c
 
 
-def searchlights(CW, CH, phase):
+def signal_spotlights(CW, CH, phase):
+    """Two signal beams sweeping over the city, each ending in a bright disc of light."""
     lay = Image.new("L", (CW, CH), 0)
-    d = ImageDraw.Draw(lay)
-    for (ox, oy, base, swing, off) in [(70, 70, 0.6, 0.6, 0.0), (CW - 70, CH - 60, 3.6, 0.55, 0.5)]:
-        a = base + swing * math.sin(2 * math.pi * (phase + off))
-        L = 420
-        p1 = (ox + L * math.cos(a - 0.09), oy + L * math.sin(a - 0.09))
-        p2 = (ox + L * math.cos(a + 0.09), oy + L * math.sin(a + 0.09))
-        d.polygon([(ox, oy), p1, p2], fill=46)
-        d.ellipse([ox - 5, oy - 5, ox + 5, oy + 5], fill=200)
-    return np.asarray(lay.filter(ImageFilter.GaussianBlur(10)), np.float32)[..., None] / 255.0
+    disc = Image.new("L", (CW, CH), 0)
+    d, dd = ImageDraw.Draw(lay), ImageDraw.Draw(disc)
+    beams = [((-80, -60), (0.22, 0.30), (0.20, 0.18), 0.0),
+             ((CW + 80, CH + 60), (0.78, 0.70), (0.20, 0.20), 0.5)]
+    for (ox, oy), (bx, by), (ax, ay), off in beams:
+        a = 2 * math.pi * (phase + off)
+        tx = CW * (bx + ax * math.sin(a))
+        ty = CH * (by + ay * math.sin(2 * a + 0.8))
+        ang = math.atan2(ty - oy, tx - ox)
+        dist = math.hypot(tx - ox, ty - oy)
+        rr = 58
+        pxv, pyv = -math.sin(ang), math.cos(ang)
+        d.polygon([(ox + pxv * 10, oy + pyv * 10), (ox - pxv * 10, oy - pyv * 10),
+                   (tx - pxv * rr, ty - pyv * rr), (tx + pxv * rr, ty + pyv * rr)], fill=34)
+        dd.ellipse([tx - rr, ty - rr * 0.82, tx + rr, ty + rr * 0.82], fill=185)
+        dd.ellipse([tx - rr * 0.8, ty - rr * 0.66, tx + rr * 0.8, ty + rr * 0.66], fill=95)
+        dd.ellipse([tx - rr * 0.55, ty - rr * 0.45, tx + rr * 0.55, ty + rr * 0.45], fill=125)
+    beam = np.asarray(lay.filter(ImageFilter.GaussianBlur(14)), np.float32)[..., None] / 255.0
+    spot = np.asarray(disc.filter(ImageFilter.GaussianBlur(5)), np.float32)[..., None] / 255.0
+    return beam, spot
+
+
+def pond_lights(W):
+    """Warm underwater lights set around the pond's edge, shining inward."""
+    y, x = np.mgrid[0:W, 0:W].astype(np.float32)
+    c = W / 2
+    out = np.zeros((W, W), np.float32)
+    for k in range(8):
+        a = 2 * math.pi * k / 8 + 0.2
+        lx, ly = c + 190 * math.cos(a), c + 190 * math.sin(a)
+        d2 = (x - lx) ** 2 + (y - ly) ** 2
+        out += np.exp(-d2 / (2 * 38 ** 2)) * 0.9 + np.exp(-d2 / (2 * 9 ** 2)) * 0.8
+        return out[..., None]
 
 
 # ---------- main ----------
@@ -553,12 +577,12 @@ def main(src, dst):
     moon_col = np.array([0.80, 0.88, 1.0], np.float32)
 
     # wide canvas: the pond sits in a night garden that fades into the page
-    CW, CH = 960, 640
+    CW, CH = 1200, 760
     OX, OY = (CW - W) // 2, (CH - W) // 2
     page = np.array([13, 17, 23], np.float32) / 255.0
     pcx, pcy = OX + W / 2, OY + W / 2
-    traffic = Traffic(CW, CH, pcx, pcy, ring_r=292, n_frames=n)
-    park_r = traffic.R - RING_W / 2 - 2
+    traffic = Traffic(CW, CH, pcx, pcy, n_frames=n)
+    park_r = 0
     cityimg, windows, lamps, streets, sxs, sys_ = city(CW, CH, pcx, pcy, park_r, traffic)
     park = garden(max(CW, CH))[:CH, :CW, :3] * 0.8
     yy, xx = np.mgrid[0:CH, 0:CW].astype(np.float32)
@@ -569,7 +593,12 @@ def main(src, dst):
     e = (ex ** 4 + ey ** 4) ** 0.25
     t = np.clip((e - 0.80) / (0.995 - 0.80), 0, 1)
     edge_fade = (t * t * (3 - 2 * t))[..., None]
-    parkmask = np.clip((park_r - pd) / 18, 0, 1)[..., None]
+    sd = traffic.ring_sdf_grid(xx, yy)
+    parkmask = np.clip((-sd - RING_W / 2 - 3) / 16, 0, 1)[..., None]
+    deck, deck_sh = traffic.deck_layer(CW, CH)
+    da = deck[..., 3:4]
+    plights = pond_lights(W)
+    spot_col = np.array([1.0, 0.86, 0.52], np.float32)
     outer = park * parkmask + cityimg * (1 - parkmask)
     shade = np.ones_like(parkmask)
 
@@ -607,7 +636,8 @@ def main(src, dst):
         k = arr(koi)
 
         cst = looping_caustic(W, phase)[..., None]
-        floor = water + cst * caus_col * (0.10 + 0.12 * depth)
+        floor = water + cst * caus_col * (0.15 + 0.14 * depth)
+        floor = floor + plights * np.array([1.0, 0.78, 0.36], np.float32) * 0.22 * (0.9 + 0.1 * math.sin(2 * math.pi * phase * 2))
 
         ka = Image.fromarray((k[..., 3] * 255).astype(np.uint8))
         ksh = np.asarray(ka.filter(ImageFilter.GaussianBlur(5)), np.float32) / 255.0
@@ -640,20 +670,26 @@ def main(src, dst):
         f = feather[OY:OY + W, OX:OX + W]
         out[OY:OY + W, OX:OX + W] = sq * f + region * (1 - f)
         out = out * shade
-        lights = city_lights(CW, CH, phase, windows, lamps, sxs, sys_) * (1 - parkmask)
-        csh, cbody, clights = traffic.frame(i)
-        out = out * (1 - 0.6 * csh)
-        ca = cbody[..., 3:4]
-        out = out * (1 - ca) + cbody[..., :3] * ca
-        lights = lights + clights
-        out = out + lights + searchlights(CW, CH, phase) * np.array([0.95, 0.82, 0.5], np.float32) * (1 - parkmask * 0.7)
+        (gsh, gbody, glights), (tsh, tbody, tlights) = traffic.frame(i)
+        out = out * (1 - 0.6 * gsh)
+        ga = gbody[..., 3:4]
+        out = out * (1 - ga) + gbody[..., :3] * ga
+        out = out * (1 - 0.55 * deck_sh)
+        ground_lights = city_lights(CW, CH, phase, windows, lamps, sxs, sys_) * (1 - parkmask) + glights
+        beam, spot = signal_spotlights(CW, CH, phase)
+        out = out + ground_lights * (1 - da) + spot * spot_col * (1 - parkmask * 0.6) * (1 - da * 0.5)
+        out = out * (1 - da) + deck[..., :3] * da
+        out = out * (1 - 0.6 * tsh)
+        ta_ = tbody[..., 3:4]
+        out = out * (1 - ta_) + tbody[..., :3] * ta_
+        out = out + tlights + beam * spot_col * 0.9
         out = out + fireflies_canvas(CW, CH, phase)[..., None] * gold
         out = (1 - np.exp(-out * 1.6)) / (1 - math.exp(-1.6))
         out = out * (1 - edge_fade) + page * edge_fade
         frames.append(Image.fromarray(np.clip(out * 255, 0, 255).astype(np.uint8)))
 
     frames[0].save(dst, save_all=True, append_images=frames[1:], duration=duration,
-                   loop=0, quality=78, method=4)
+                   loop=0, quality=68, method=4)
 
 
 if __name__ == "__main__":

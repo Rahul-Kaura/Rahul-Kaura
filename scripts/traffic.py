@@ -1,10 +1,18 @@
-"""Roundabout traffic for the night city around the pond.
+"""Night traffic around the pond: ring road, side streets, elevated highways.
 
-A one-lane roundabout circles the park. Six roads leave it for the edges of the
-city. Each car enters on one road, stops at its signal if the light is red,
-circles counterclockwise and leaves by another road. Every car's schedule is
-solved so its trip, including any wait, takes exactly one loop of the
-animation, so the whole scene loops seamlessly.
+Layout (canvas CW x CH, pond centred):
+  - A two-lane ring road (rounded rectangle) circles the park, counterclockwise
+    on screen. The inner lane carries a steady row of cars; the outer lane is
+    used by cars joining and leaving.
+  - Two horizontal side streets on each side connect the ring to the city edge.
+    Each has a signal at its entry to the ring.
+  - An elevated highway runs down each end of the canvas. The side streets pass
+    under it. Cloverleaf loop ramps bring cars off the highway and under the
+    deck; on-ramps merge cars back up onto it.
+
+Cars on the routes are simulated with simple car following and red lights
+until the traffic settles into a repeating pattern, then one period is
+recorded, so the animation loops seamlessly.
 """
 
 import math
@@ -13,280 +21,431 @@ import random
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
-ROAD_W = 26          # spoke road width
-LANE = 5.5           # lane offset from the spoke's centerline
-RING_W = 24          # roundabout width
-STOP_GAP = 16        # stop line distance outside the ring's outer edge
-QUEUE_GAP = 26       # spacing of cars queued at a light
-SCALE = 3            # sprite supersampling
+SCALE = 3          # car sprite supersampling
+DECK_W = 64        # highway deck width
+RING_W = 34        # ring road width (two lanes)
+ST_W = 26          # side street width
+LANE = 6.5         # lane offset from a two-way street's centreline
+
+# speed limits in px per frame: slow, calm traffic
+V_GROUND, V_RING, V_RAMP, V_HWY = 0.95, 0.85, 0.8, 1.4
+
+
+def bezier(p0, p1, p2, p3, k=28):
+    out = []
+    for i in range(k + 1):
+        t = i / k
+        a, b, c, d = (1 - t) ** 3, 3 * (1 - t) ** 2 * t, 3 * (1 - t) * t * t, t ** 3
+        out.append((a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0], a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1]))
+    return out
+
+
+def arc(cx, cy, r, a0, a1, k=40):
+    return [(cx + r * math.cos(a0 + (a1 - a0) * i / k), cy + r * math.sin(a0 + (a1 - a0) * i / k)) for i in range(k + 1)]
+
+
+class Path:
+    """Polyline with per-point kind ('ground', 'ramp', 'hwy') and speed limit."""
+
+    def __init__(self):
+        self.pts, self.kind, self.vmax = [], [], []
+
+    def add(self, pts, kind, vmax):
+        for p in pts:
+            if self.pts and math.hypot(p[0] - self.pts[-1][0], p[1] - self.pts[-1][1]) < 0.5:
+                continue
+            self.pts.append((float(p[0]), float(p[1])))
+            self.kind.append(kind)
+            self.vmax.append(vmax)
+        return self
+
+    def finish(self):
+        self.P = np.array(self.pts, np.float32)
+        seg = np.hypot(*(self.P[1:] - self.P[:-1]).T)
+        self.cum = np.concatenate([[0], np.cumsum(seg)])
+        self.length = float(self.cum[-1])
+        return self
+
+    def at(self, s):
+        s = min(max(s, 0.0), self.length - 1e-3)
+        i = int(np.searchsorted(self.cum, s) - 1)
+        i = max(0, min(i, len(self.P) - 2))
+        t = (s - self.cum[i]) / max(self.cum[i + 1] - self.cum[i], 1e-6)
+        x, y = self.P[i] * (1 - t) + self.P[i + 1] * t
+        dx, dy = self.P[i + 1] - self.P[i]
+        return float(x), float(y), math.atan2(dy, dx), self.kind[i], self.vmax[i]
+
+    def nearest_s(self, x, y):
+        P = np.array(self.pts, np.float32)
+        cum = np.concatenate([[0], np.cumsum(np.hypot(*(P[1:] - P[:-1]).T))])
+        d = np.hypot(P[:, 0] - x, P[:, 1] - y)
+        return float(cum[int(np.argmin(d))])
 
 
 class Traffic:
-    def __init__(self, CW, CH, cx, cy, ring_r, n_frames, seed=1939):
-        self.CW, self.CH, self.cx, self.cy, self.R, self.n = CW, CH, cx, cy, ring_r, n_frames
+    def __init__(self, CW, CH, cx, cy, n_frames, seed=1939):
+        self.CW, self.CH, self.cx, self.cy, self.n = CW, CH, cx, cy, n_frames
         self.rng = random.Random(seed)
-        corner = lambda x, y: math.atan2(y - cy, x - cx)
-        # six exits: west, east and the four corners
-        self.spokes = [math.pi, 0.0, corner(0, 0), corner(CW, 0), corner(0, CH), corner(CW, CH)]
-        # two signal groups take turns: red for half the loop each
-        self.group = [0, 1, 1, 0, 0, 1]
-        self.cars = []
-        self._build_cars()
+        self.ra, self.rb, self.rc = 345, 318, 150     # ring centreline half sizes, corner radius
+        self.HL, self.HR = 96, CW - 96                 # highway centrelines
+        self.y_up, self.y_lo = cy - 92, cy + 92        # side streets
+        self._ring_cache = {}
+        self._build_routes()
+        self._simulate()
+        self.sprites = {}
 
-    # ---------- geometry ----------
+    # ---------- ring geometry ----------
 
-    def spoke_len(self, th):
-        ux, uy = math.cos(th), math.sin(th)
-        ts = []
-        if ux > 1e-6:
-            ts.append((self.CW + 60 - self.cx) / ux)
-        if ux < -1e-6:
-            ts.append((-60 - self.cx) / ux)
-        if uy > 1e-6:
-            ts.append((self.CH + 60 - self.cy) / uy)
-        if uy < -1e-6:
-            ts.append((-60 - self.cy) / uy)
-        return min(ts)
-
-    def corridor_dist(self, x, y):
-        """Distance from a point to the nearest road centerline (ring or spoke)."""
-        dx, dy = x - self.cx, y - self.cy
-        d = math.hypot(dx, dy)
-        best = abs(d - self.R)
-        for th in self.spokes:
-            ux, uy = math.cos(th), math.sin(th)
-            t = dx * ux + dy * uy
-            if t > self.R:
-                best = min(best, abs(-dx * uy + dy * ux))
-        return best
-
-    def route(self, a, b):
-        """Polyline for a trip entering on spoke a, leaving on spoke b."""
-        ta, tb = self.spokes[a], self.spokes[b]
+    def ring_lane(self, off):
+        """Closed polyline of the ring offset outward by off, counterclockwise on screen."""
+        key = round(off, 2)
+        if key in self._ring_cache:
+            return self._ring_cache[key]
+        a, b, rc = self.ra + off, self.rb + off, self.rc + off
+        cx, cy = self.cx, self.cy
         pts = []
-        # inbound lane, travelling toward the centre
-        ux, uy = math.cos(ta), math.sin(ta)
-        rx, ry = -(-uy), -ux  # right of the inbound direction (-u) in screen coords
-        L = self.spoke_len(ta)
-        for t in np.linspace(L, self.R + RING_W / 2 + 4, 24):
-            pts.append((self.cx + ux * t + rx * LANE, self.cy + uy * t + ry * LANE))
-        stop_s = None
-        # around the ring, counterclockwise on screen (angle decreasing)
-        arc = (ta - tb) % (2 * math.pi)
-        if arc < 0.6:
-            arc += 2 * math.pi
-        start = ta - 0.12
-        steps = max(8, int(arc * 40))
-        for k in range(steps + 1):
-            th = start - (arc - 0.24) * k / steps
-            pts.append((self.cx + self.R * math.cos(th), self.cy + self.R * math.sin(th)))
-        # outbound lane
-        ux, uy = math.cos(tb), math.sin(tb)
-        rx, ry = -uy, ux  # right of the outbound direction (u)
-        L = self.spoke_len(tb)
-        for t in np.linspace(self.R + RING_W / 2 + 4, L, 24):
-            pts.append((self.cx + ux * t + rx * LANE, self.cy + uy * t + ry * LANE))
-        pts = np.array(pts, np.float32)
-        seg = np.hypot(*(pts[1:] - pts[:-1]).T)
-        cum = np.concatenate([[0], np.cumsum(seg)])
-        # stop line: on the inbound lane, STOP_GAP outside the ring
-        stop_r = self.R + RING_W / 2 + STOP_GAP
-        stop_s = self.spoke_len(ta) - stop_r
-        return pts, cum, stop_s
+        pts += [(cx + a, y) for y in np.linspace(cy + b - rc, cy - b + rc, 40)]
+        pts += arc(cx + a - rc, cy - b + rc, rc, 0, -math.pi / 2)
+        pts += [(x, cy - b) for x in np.linspace(cx + a - rc, cx - a + rc, 50)]
+        pts += arc(cx - a + rc, cy - b + rc, rc, -math.pi / 2, -math.pi)
+        pts += [(cx - a, y) for y in np.linspace(cy - b + rc, cy + b - rc, 40)]
+        pts += arc(cx - a + rc, cy + b - rc, rc, math.pi, math.pi / 2)
+        pts += [(x, cy + b) for x in np.linspace(cx - a + rc, cx + a - rc, 50)]
+        pts += arc(cx + a - rc, cy + b - rc, rc, math.pi / 2, 0)
+        self._ring_cache[key] = pts
+        return pts
 
-    def light_red(self, spoke, frame):
-        half = self.n // 2
-        f = frame % self.n
-        red_first = self.group[spoke] == 0
-        return (f < half) == red_first
-
-    # ---------- schedule ----------
-
-    def _schedule(self, total, stop_s, spoke, offset):
-        """Speed, time to reach the stop line, and wait, so the trip takes one loop."""
-        n = self.n
-        wait = 0.0
-        for _ in range(8):
-            v = total / (n - wait)
-            ta = stop_s / v
-            arrive = (offset + ta) % n
-            if self.light_red(spoke, int(math.floor(arrive))):
-                half = n // 2
-                new_wait = (half if arrive < half else n) - arrive
-            else:
-                new_wait = 0.0
-            if abs(new_wait - wait) < 0.5:
-                wait = new_wait
+    def ring_segment(self, off, p_from, p_to):
+        pts = self.ring_lane(off)
+        P = np.array(pts)
+        i0 = int(np.argmin(np.hypot(P[:, 0] - p_from[0], P[:, 1] - p_from[1])))
+        i1 = int(np.argmin(np.hypot(P[:, 0] - p_to[0], P[:, 1] - p_to[1])))
+        out, i = [], i0
+        while True:
+            out.append(pts[i])
+            if i == i1:
                 break
-            wait = new_wait
-        v = total / (n - wait)
-        return v, stop_s / v, wait
-
-    def _build_cars(self):
-        r = self.rng
-        kinds = (["sedan"] * 5 + ["taxi"] * 3 + ["suv"] * 3 + ["sports"] * 2 + ["truck"] * 2 + ["police"] * 2)
-        r.shuffle(kinds)
-        queue = {i: 0 for i in range(len(self.spokes))}
-        order = list(range(len(kinds)))
-        for idx in order:
-            a = idx % len(self.spokes)
-            b = (a + r.randint(1, len(self.spokes) - 1)) % len(self.spokes)
-            pts, cum, stop_s = self.route(a, b)
-            slot = queue[a]
-            queue[a] += 1
-            stop_s_q = stop_s - (slot % 3) * QUEUE_GAP
-            offset = r.uniform(0, self.n) if slot == 0 else (r.uniform(0, self.n))
-            v, ta, wait = self._schedule(cum[-1], stop_s_q, a, offset)
-            kind = kinds[idx]
-            self.cars.append(dict(kind=kind, pts=pts, cum=cum, v=v, ta=ta, wait=wait, offset=offset,
-                                  stop=stop_s_q, sprite=car_sprite(kind, r), seed=r.random()))
-
-    # ---------- per-frame ----------
-
-    def state(self, car, frame):
-        tau = (frame - car["offset"]) % self.n
-        if tau < car["ta"]:
-            s, braking = car["v"] * tau, (car["ta"] - tau) < 4 and car["wait"] > 0
-        elif tau < car["ta"] + car["wait"]:
-            s, braking = car["stop"], True
-        else:
-            s, braking = car["stop"] + car["v"] * (tau - car["ta"] - car["wait"]), False
-        cum, pts = car["cum"], car["pts"]
-        s = min(max(s, 0), cum[-1] - 1e-3)
-        i = int(np.searchsorted(cum, s) - 1)
-        i = max(0, min(i, len(pts) - 2))
-        t = (s - cum[i]) / max(cum[i + 1] - cum[i], 1e-6)
-        x, y = pts[i] * (1 - t) + pts[i + 1] * t
-        hx, hy = pts[i + 1] - pts[i]
-        h = math.atan2(hy, hx)
-        return float(x), float(y), h, braking
-
-    def draw_roads(self, img, S):
-        """Draw the roundabout and spokes onto an RGB image supersampled by S."""
-        d = ImageDraw.Draw(img)
-        cx, cy, R = self.cx * S, self.cy * S, self.R * S
-        asphalt = (17, 18, 23)
-        for th in self.spokes:
-            L = self.spoke_len(th)
-            ux, uy = math.cos(th), math.sin(th)
-            px, py = -uy, ux
-            hw = ROAD_W / 2
-            a0 = (self.cx + ux * self.R, self.cy + uy * self.R)
-            a1 = (self.cx + ux * L, self.cy + uy * L)
-            poly = [(a0[0] + px * hw, a0[1] + py * hw), (a1[0] + px * hw, a1[1] + py * hw),
-                    (a1[0] - px * hw, a1[1] - py * hw), (a0[0] - px * hw, a0[1] - py * hw)]
-            d.polygon([(x * S, y * S) for x, y in poly], fill=asphalt)
-            for side in (hw, -hw):
-                d.line([((a0[0] + px * side) * S, (a0[1] + py * side) * S), ((a1[0] + px * side) * S, (a1[1] + py * side) * S)],
-                       fill=(46, 47, 54), width=S)
-            # gold double centerline
-            for off in (-0.9, 0.9):
-                d.line([((a0[0] + px * off) * S, (a0[1] + py * off) * S), ((a1[0] + px * off) * S, (a1[1] + py * off) * S)],
-                       fill=(150, 112, 30), width=max(1, S // 2))
-            # crosswalk and stop line on the inbound side
-            cw0 = self.R + RING_W / 2 + 4
-            for k in range(-5, 6):
-                t0, t1 = cw0, cw0 + 8
-                o = k * 2.4
-                d.line([((self.cx + ux * t0 + px * o) * S, (self.cy + uy * t0 + py * o) * S),
-                        ((self.cx + ux * t1 + px * o) * S, (self.cy + uy * t1 + py * o) * S)], fill=(70, 72, 80), width=S)
-            sr = self.R + RING_W / 2 + STOP_GAP - 6
-            rx, ry = uy, -ux
-            d.line([((self.cx + ux * sr) * S, (self.cy + uy * sr) * S),
-                    ((self.cx + ux * sr + rx * hw) * S, (self.cy + uy * sr + ry * hw) * S)], fill=(150, 150, 155), width=S)
-        # ring
-        ro, ri = (self.R + RING_W / 2) * S, (self.R - RING_W / 2) * S
-        d.ellipse([cx - ro, cy - ro, cx + ro, cy + ro], fill=asphalt)
-        d.ellipse([cx - ro, cy - ro, cx + ro, cy + ro], outline=(46, 47, 54), width=S)
-        d.ellipse([cx - ri, cy - ri, cx + ri, cy + ri], outline=(60, 62, 70), width=S)
-        # dashed gold centre ring
-        for k in range(0, 360, 4):
-            a0, a1 = math.radians(k), math.radians(k + 2)
-            d.line([(cx + R * math.cos(a0), cy + R * math.sin(a0)), (cx + R * math.cos(a1), cy + R * math.sin(a1))],
-                   fill=(110, 84, 26), width=max(1, S // 2))
-
-    def signals(self):
-        out = []
-        for i, th in enumerate(self.spokes):
-            ux, uy = math.cos(th), math.sin(th)
-            rx, ry = uy, -ux  # right of the inbound direction
-            sr = self.R + RING_W / 2 + STOP_GAP - 2
-            out.append((i, self.cx + ux * sr + rx * (ROAD_W / 2 + 5), self.cy + uy * sr + ry * (ROAD_W / 2 + 5)))
+            i = (i + 1) % len(pts)
         return out
 
-    def frame(self, frame):
-        """Car bodies (RGBA float array) and their lights (RGB float array, additive)."""
+    def ring_sdf_grid(self, X, Y, off=0.0):
+        a, b, rc = self.ra + off, self.rb + off, self.rc + off
+        qx, qy = np.abs(X - self.cx) - a + rc, np.abs(Y - self.cy) - b + rc
+        return np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - rc
+
+    # ---------- routes ----------
+
+    def _build_routes(self):
+        CW, CH, cx = self.CW, self.CH, self.cx
+        HL, HR, yu, yl = self.HL, self.HR, self.y_up, self.y_lo
+        out_lane, in_lane = RING_W / 4, -RING_W / 4
+        xl_ring = cx - self.ra - RING_W / 2
+        xr_ring = cx + self.ra + RING_W / 2
+        G, R, RP, H = V_GROUND, V_RING, V_RAMP, V_HWY
+        hd = DECK_W / 2
+
+        # A: right edge -> under right highway -> upper right street -> top of ring -> upper left street -> under left highway
+        A = Path()
+        A.add([(CW + 50, yu - LANE), (xr_ring + 2, yu - LANE)], "ground", G)
+        A.add(self.ring_segment(out_lane, (xr_ring, yu - LANE), (xl_ring, yu - LANE)), "ground", R)
+        A.add([(xl_ring - 2, yu - LANE), (-50, yu - LANE)], "ground", G)
+        A.stop, A.light = A.nearest_s(xr_ring + 16, yu - LANE), 0
+
+        # B: left highway southbound -> cloverleaf loop -> under the deck -> upper left street ->
+        #    left side of ring -> lower left street -> on-ramp -> left highway northbound
+        B = Path()
+        sb = HL - 22
+        lc = (HL - hd - 30, yu - 30)
+        B.add([(sb, -50), (sb, yu - 150)], "hwy", H)
+        B.add(bezier((sb, yu - 150), (sb, yu - 110), (lc[0] + 30, yu - 95), (lc[0] + 30, yu - 60)), "ramp", RP)
+        B.add(arc(lc[0], lc[1], 30, 0, math.pi, 40), "ramp", RP)
+        B.add(bezier((lc[0] - 30, lc[1]), (lc[0] - 30, yu + LANE), (lc[0] - 10, yu + LANE), (lc[0] + 15, yu + LANE)), "ramp", RP)
+        B.add([(lc[0] + 15, yu + LANE), (xl_ring - 2, yu + LANE)], "ground", G)
+        B.add(self.ring_segment(out_lane, (xl_ring, yu + LANE), (xl_ring, yl - LANE)), "ground", R)
+        nb = HL + 22
+        B.add([(xl_ring - 2, yl - LANE), (HL + hd + 60, yl - LANE)], "ground", G)
+        B.add(bezier((HL + hd + 60, yl - LANE), (HL + hd + 20, yl - LANE), (nb, yl - 30), (nb, yl - 80)), "ramp", RP)
+        B.add([(nb, yl - 80), (nb, -50)], "hwy", H)
+        B.stop, B.light = B.nearest_s(xl_ring - 16, yu + LANE), 1
+
+        # C: left edge -> under left highway -> lower left street -> bottom of ring -> lower right street -> under right highway
+        C = Path()
+        C.add([(-50, yl + LANE), (xl_ring - 2, yl + LANE)], "ground", G)
+        C.add(self.ring_segment(out_lane, (xl_ring, yl + LANE), (xr_ring, yl + LANE)), "ground", R)
+        C.add([(xr_ring + 2, yl + LANE), (CW + 50, yl + LANE)], "ground", G)
+        C.stop, C.light = C.nearest_s(xl_ring - 16, yl + LANE), 0
+
+        # D: right highway northbound -> cloverleaf loop -> under the deck -> lower right street ->
+        #    right side of ring -> upper right street -> on-ramp -> right highway southbound
+        D = Path()
+        nbr = HR + 22
+        lc = (HR + hd + 30, yl + 30)
+        D.add([(nbr, CH + 50), (nbr, yl + 150)], "hwy", H)
+        D.add(bezier((nbr, yl + 150), (nbr, yl + 110), (lc[0] - 30, yl + 95), (lc[0] - 30, yl + 60)), "ramp", RP)
+        D.add(arc(lc[0], lc[1], 30, math.pi, 2 * math.pi, 40), "ramp", RP)
+        D.add(bezier((lc[0] + 30, lc[1]), (lc[0] + 30, yl - LANE), (lc[0] + 10, yl - LANE), (lc[0] - 15, yl - LANE)), "ramp", RP)
+        D.add([(lc[0] - 15, yl - LANE), (xr_ring + 2, yl - LANE)], "ground", G)
+        D.add(self.ring_segment(out_lane, (xr_ring, yl - LANE), (xr_ring, yu + LANE)), "ground", R)
+        sbr = HR - 22
+        D.add([(xr_ring + 2, yu + LANE), (HR - hd - 60, yu + LANE)], "ground", G)
+        D.add(bezier((HR - hd - 60, yu + LANE), (HR - hd - 20, yu + LANE), (sbr, yu + 30), (sbr, yu + 80)), "ramp", RP)
+        D.add([(sbr, yu + 80), (sbr, CH + 50)], "hwy", H)
+        D.stop, D.light = D.nearest_s(xr_ring + 16, yl - LANE), 1
+
+        self.routes = []
+        for p in (A, B, C, D):
+            stop, light = p.stop, p.light
+            p.finish()
+            p.stop, p.light = stop, light
+            self.routes.append(p)
+
+        # steady rows of cars: highway inner lanes and the ring's inner lane
+        self.flows = []
+        for x, down in ((HL - 9, True), (HL + 9, False), (HR - 9, True), (HR + 9, False)):
+            f = Path()
+            f.add([(x, -60), (x, CH + 60)] if down else [(x, CH + 60), (x, -60)], "hwy", H)
+            self.flows.append((f.finish(), 58 + self.rng.uniform(0, 16), 1))
+        ring = Path()
+        rp = self.ring_lane(in_lane)
+        ring.add(rp + [rp[0]], "ground", R)
+        self.flows.append((ring.finish(), 92, 1))
+
+    # ---------- signals ----------
+
+    def light_red(self, group, frame):
+        half = self.n // 2
+        return ((frame % self.n) < half) == (group == 0)
+
+    # ---------- simulation ----------
+
+    def _simulate(self):
+        n = self.n
+        kinds = ["sedan", "sedan", "sedan", "taxi", "taxi", "suv", "suv", "sports", "truck", "police"]
+        spawn_every = n
+        warm = 12 * n
+        self.route_frames = []
+        for ri, path in enumerate(self.routes):
+            cars, frames = [], []
+            for f in range(warm + n):
+                if f % spawn_every == 0:
+                    k = kinds[(ri * 3 + (f // spawn_every)) % len(kinds)]
+                    if not cars or cars[-1]["s"] > 30:
+                        cars.append(dict(s=0.0, v=0.6, kind=k, brake=False, id=(ri, f % n, (f // n) % 3)))
+                red = self.light_red(path.light, f)
+                for i, c in enumerate(cars):
+                    vmax = path.at(c["s"])[4]
+                    gap = 1e9
+                    if i > 0:
+                        gap = cars[i - 1]["s"] - c["s"] - 24
+                    if red and c["s"] < path.stop - 1:
+                        gap = min(gap, path.stop - c["s"] - 4)
+                    safe = max(0.0, gap * 0.08)
+                    nv = min(c["v"] + 0.025, vmax, safe)
+                    c["brake"] = nv < c["v"] - 0.005 or (nv < 0.1 and gap < 40)
+                    c["v"] = max(0.0, nv)
+                for c in cars:
+                    c["s"] += c["v"]
+                cars = [c for c in cars if c["s"] < path.length - 1]
+                if f >= warm:
+                    frames.append([(c["s"], c["kind"], c["brake"], (c["kind"],) + c["id"][:2]) for c in cars])
+            self.route_frames.append(frames)
+
+    def sprite(self, key, kind):
+        if key not in self.sprites:
+            self.sprites[key] = car_sprite(kind, random.Random(hash(key) & 0xFFFFFFFF))
+        return self.sprites[key]
+
+    def cars_at(self, frame):
+        out = []
+        for ri, path in enumerate(self.routes):
+            for (s, kind, brake, key) in self.route_frames[ri][frame % self.n]:
+                x, y, h, k, _ = path.at(s)
+                out.append((x, y, h, self.elevated(x, k), kind, brake, ("r",) + key))
+        flow_kinds = ["sedan", "suv", "sedan", "taxi", "truck", "sedan", "sports", "suv", "police", "sedan"]
+        for fi, (path, gap, m) in enumerate(self.flows):
+            count = max(1, int(path.length // gap))
+            spacing = path.length / count
+            shift = spacing * m * (frame % self.n) / self.n
+            for j in range(count):
+                s = (j * spacing + shift) % path.length
+                x, y, h, k, _ = path.at(s)
+                kind = flow_kinds[(j * 7 + fi * 3) % len(flow_kinds)]
+                out.append((x, y, h, self.elevated(x, k), kind, False, ("f", fi, j)))
+        return out
+
+    def elevated(self, x, kind):
+        if kind == "ground":
+            return False
+        return abs(x - self.HL) <= DECK_W / 2 + 2 or abs(x - self.HR) <= DECK_W / 2 + 2
+
+    # ---------- static drawing ----------
+
+    def road_mask(self, CW, CH, pad=10):
+        m = Image.new("L", (CW, CH), 0)
+        d = ImageDraw.Draw(m)
+        for y in (self.y_up, self.y_lo):
+            d.rectangle([0, y - ST_W / 2 - pad, CW, y + ST_W / 2 + pad], fill=255)
+        for x in (self.HL, self.HR):
+            d.rectangle([x - DECK_W / 2 - pad, 0, x + DECK_W / 2 + pad, CH], fill=255)
+        for path in self.routes:
+            pts = [(float(px), float(py)) for (px, py), k in zip(path.P, path.kind) if k == "ramp"]
+            if len(pts) > 1:
+                d.line(pts, fill=255, width=int(14 + pad * 2))
+        X, Y = np.meshgrid(np.arange(CW, dtype=np.float32), np.arange(CH, dtype=np.float32))
+        sd = self.ring_sdf_grid(X, Y)
+        return (np.asarray(m) > 0) | (sd < RING_W / 2 + pad)
+
+    def draw_ground(self, img, S):
+        d = ImageDraw.Draw(img)
+        asphalt, edge, gold = (17, 18, 23), (48, 49, 56), (150, 112, 30)
         CW, CH = self.CW, self.CH
-        body = Image.new("RGBA", (CW, CH), (0, 0, 0, 0))
-        shadow = Image.new("L", (CW, CH), 0)
-        glow = Image.new("RGB", (CW, CH), (0, 0, 0))
-        core = Image.new("RGB", (CW, CH), (0, 0, 0))
-        dg, dc, dsh = ImageDraw.Draw(glow), ImageDraw.Draw(core), ImageDraw.Draw(shadow)
+        for y in (self.y_up, self.y_lo):
+            d.rectangle([0, (y - ST_W / 2) * S, CW * S, (y + ST_W / 2) * S], fill=asphalt)
+            for yy in (y - ST_W / 2, y + ST_W / 2):
+                d.line([(0, yy * S), (CW * S, yy * S)], fill=edge, width=S)
+            for off in (-0.9, 0.9):
+                d.line([(0, (y + off) * S), (CW * S, (y + off) * S)], fill=gold, width=max(1, S // 2))
+        for path in self.routes:
+            pts = [(float(px) * S, float(py) * S) for (px, py), k in zip(path.P, path.kind) if k == "ramp"]
+            if len(pts) > 1:
+                d.line(pts, fill=edge, width=16 * S, joint="curve")
+                d.line(pts, fill=asphalt, width=13 * S, joint="curve")
+        X = np.arange(CW * S, dtype=np.float32)[None, :] / S
+        Y = np.arange(CH * S, dtype=np.float32)[:, None] / S
+        sd = self.ring_sdf_grid(X, Y)
+        arr = np.asarray(img).copy()
+        arr[np.abs(sd) < RING_W / 2] = asphalt
+        arr[np.abs(np.abs(sd) - RING_W / 2) < 0.7] = edge
+        img.paste(Image.fromarray(arr))
+        d = ImageDraw.Draw(img)
+        pts = self.ring_lane(0)
+        for i in range(0, len(pts) - 1, 2):
+            d.line([(pts[i][0] * S, pts[i][1] * S), (pts[i + 1][0] * S, pts[i + 1][1] * S)], fill=(120, 122, 130), width=max(1, S // 2))
+        for path in self.routes:
+            x, y, h, _, _ = path.at(path.stop)
+            ux, uy = math.cos(h), math.sin(h)
+            px, py = -uy, ux
+            d.line([((x + ux * 3 - px * 1) * S, (y + uy * 3 - py * 1) * S),
+                    ((x + ux * 3 + px * LANE * 1.9) * S, (y + uy * 3 + py * LANE * 1.9) * S)], fill=(160, 160, 165), width=S)
+            for k in range(-5, 6):
+                o = k * 2.4
+                d.line([((x + ux * 6 + px * o) * S, (y + uy * 6 + py * o) * S),
+                        ((x + ux * 13 + px * o) * S, (y + uy * 13 + py * o) * S)], fill=(64, 66, 74), width=S)
 
-        # traffic signals
-        for (i, x, y) in self.signals():
-            red = self.light_red(i, frame)
-            dsh.rectangle([x - 2.5, y - 4.5, x + 3.5, y + 5.5], fill=150)
-            col = (255, 40, 30) if red else (40, 255, 120)
-            gl = (150, 20, 12) if red else (20, 150, 70)
-            ly = y - 2 if red else y + 2
-            dg.ellipse([x - 9, ly - 9, x + 9, ly + 9], fill=gl)
-            dc.ellipse([x - 1.6, ly - 1.6, x + 1.6, ly + 1.6], fill=col)
-            dc.ellipse([x - 1.2, (y + 2 if red else y - 2) - 1.2, x + 1.2, (y + 2 if red else y - 2) + 1.2], fill=(30, 30, 30))
+    def deck_layer(self, CW, CH):
+        S = 2
+        lay = Image.new("RGBA", (CW * S, CH * S), (0, 0, 0, 0))
+        sh = Image.new("L", (CW * S, CH * S), 0)
+        d, ds = ImageDraw.Draw(lay), ImageDraw.Draw(sh)
+        for x in (self.HL, self.HR):
+            x0, x1 = (x - DECK_W / 2) * S, (x + DECK_W / 2) * S
+            ds.rectangle([x0 + 10 * S, 0, x1 + 10 * S, CH * S], fill=170)
+            d.rectangle([x0, 0, x1, CH * S], fill=(27, 28, 34, 255))
+            d.rectangle([x0, 0, x0 + 2 * S, CH * S], fill=(84, 86, 96, 255))
+            d.rectangle([x1 - 2 * S, 0, x1, CH * S], fill=(84, 86, 96, 255))
+            d.rectangle([x * S - 1.5 * S, 0, x * S + 1.5 * S, CH * S], fill=(66, 68, 76, 255))
+            for xo in (-15.5, 15.5):
+                for yy in range(0, CH, 12):
+                    d.line([((x + xo) * S, yy * S), ((x + xo) * S, (yy + 6) * S)], fill=(110, 112, 120, 255), width=S)
+            for xo in (-2.6, 2.6):
+                d.line([((x + xo) * S, 0), ((x + xo) * S, CH * S)], fill=(150, 112, 30, 255), width=S)
+            for yy in range(0, CH, 60):
+                d.line([(x0, yy * S), (x1, yy * S)], fill=(20, 21, 26, 255), width=S)
+        for path in self.routes:
+            pts = [(float(px) * S, float(py) * S) for (px, py), k in zip(path.P, path.kind)
+                   if k == "ramp" and self.elevated(float(px), k)]
+            if len(pts) > 1:
+                d.line(pts, fill=(27, 28, 34, 255), width=13 * S, joint="curve")
+        sh = sh.filter(ImageFilter.GaussianBlur(8 * S)).resize((CW, CH), Image.LANCZOS)
+        lay = lay.resize((CW, CH), Image.LANCZOS)
+        return np.asarray(lay, np.float32) / 255.0, np.asarray(sh, np.float32)[..., None] / 255.0
 
-        for car in self.cars:
-            x, y, h, braking = self.state(car, frame)
+    def deck_lamps(self):
+        return [(x, y) for x in (self.HL, self.HR) for y in range(20, self.CH, 72)]
+
+    # ---------- per frame ----------
+
+    def frame(self, frame):
+        """((shadow, body, lights) for ground level, (shadow, body, lights) for the deck level)."""
+        CW, CH = self.CW, self.CH
+        layers = {lvl: dict(body=Image.new("RGBA", (CW, CH), (0, 0, 0, 0)), shadow=Image.new("L", (CW, CH), 0),
+                            glow=Image.new("RGB", (CW, CH), (0, 0, 0)), core=Image.new("RGB", (CW, CH), (0, 0, 0)))
+                  for lvl in ("g", "t")}
+        g = layers["g"]
+        dg, dc = ImageDraw.Draw(g["glow"]), ImageDraw.Draw(g["core"])
+        for path in self.routes:
+            x, y, h, _, _ = path.at(path.stop)
+            ux, uy = math.cos(h), math.sin(h)
+            px, py = -uy, ux
+            sx, sy = x + ux * 2 + px * (ST_W / 2 + 6), y + uy * 2 + py * (ST_W / 2 + 6)
+            red = self.light_red(path.light, frame)
+            col, gl = ((255, 40, 30), (160, 20, 12)) if red else ((40, 255, 120), (20, 150, 70))
+            dg.ellipse([sx - 10, sy - 10, sx + 10, sy + 10], fill=gl)
+            dc.ellipse([sx - 1.8, sy - 1.8, sx + 1.8, sy + 1.8], fill=col)
+        t = layers["t"]
+        dg, dc = ImageDraw.Draw(t["glow"]), ImageDraw.Draw(t["core"])
+        for (x, y) in self.deck_lamps():
+            dg.ellipse([x - 16, y - 16, x + 16, y + 16], fill=(70, 56, 24))
+            dc.ellipse([x - 1.5, y - 1.5, x + 1.5, y + 1.5], fill=(255, 226, 150))
+
+        for (x, y, h, elev, kind, brake, key) in self.cars_at(frame):
             if x < -40 or x > CW + 40 or y < -40 or y > CH + 40:
                 continue
-            spr = car["sprite"]
+            L = layers["t" if elev else "g"]
+            spr = self.sprite(key, kind)
             rot = spr.rotate(-math.degrees(h), resample=Image.BICUBIC, expand=True)
             small = rot.resize((max(1, rot.width // SCALE), max(1, rot.height // SCALE)), Image.LANCZOS)
-            px, py = int(round(x - small.width / 2)), int(round(y - small.height / 2))
-            sh = Image.new("L", small.size, 0)
-            sh.paste(small.getchannel("A").point(lambda v: int(v * 0.7)))
-            shadow.paste(sh, (px + 2, py + 3), sh)
-            _paste_clip(body, small, px, py)
-
+            px0, py0 = int(round(x - small.width / 2)), int(round(y - small.height / 2))
+            _paste_l(L["shadow"], small.getchannel("A").point(lambda v: int(v * 0.75)), px0 + 2, py0 + 3)
+            _paste_clip(L["body"], small, px0, py0)
+            dg, dc = ImageDraw.Draw(L["glow"]), ImageDraw.Draw(L["core"])
             ux, uy = math.cos(h), math.sin(h)
             pxv, pyv = -uy, ux
-            L2 = spr.info_len / 2
-            hx, hy = x + ux * L2, y + uy * L2
-            bl, bw = 62, 15
-            dg.polygon([(hx + pxv * 3, hy + pyv * 3), (hx - pxv * 3, hy - pyv * 3),
+            hl = spr.info_len / 2
+            hx, hy = x + ux * hl, y + uy * hl
+            bl, bw = 46, 11
+            dg.polygon([(hx + pxv * 2.5, hy + pyv * 2.5), (hx - pxv * 2.5, hy - pyv * 2.5),
                         (hx + ux * bl - pxv * bw, hy + uy * bl - pyv * bw), (hx + ux * bl + pxv * bw, hy + uy * bl + pyv * bw)],
-                       fill=(62, 54, 36))
+                       fill=(54, 47, 32))
             for side in (-spr.info_w / 2 + 1.2, spr.info_w / 2 - 1.2):
-                dc.ellipse([hx + pxv * side - 1.4, hy + pyv * side - 1.4, hx + pxv * side + 1.4, hy + pyv * side + 1.4],
-                           fill=(255, 250, 228))
-                tx, ty = x - ux * L2 + pxv * side, y - uy * L2 + pyv * side
-                rr = 1.6 if braking else 1.2
+                dc.ellipse([hx + pxv * side - 1.3, hy + pyv * side - 1.3, hx + pxv * side + 1.3, hy + pyv * side + 1.3], fill=(255, 250, 228))
+                tx, ty = x - ux * hl + pxv * side, y - uy * hl + pyv * side
+                rr = 1.6 if brake else 1.1
                 dc.ellipse([tx - rr, ty - rr, tx + rr, ty + rr], fill=(255, 40, 28))
-                g = 10 if braking else 6
-                dg.ellipse([tx - g, ty - g, tx + g, ty + g], fill=(230, 20, 10) if braking else (130, 12, 6))
-            if car["kind"] == "police":
+                gg = 7 if brake else 5
+                dg.ellipse([tx - gg, ty - gg, tx + gg, ty + gg], fill=(170, 18, 10) if brake else (110, 12, 6))
+            if kind == "police":
                 on = (frame // 2) % 2 == 0
                 for side, col in ((-2.2, (255, 30, 30)), (2.2, (40, 90, 255))):
-                    lit = on if side < 0 else not on
-                    if not lit:
+                    if (side < 0) != on:
                         continue
                     bx, by = x + pxv * side, y + pyv * side
                     dc.ellipse([bx - 1.6, by - 1.6, bx + 1.6, by + 1.6], fill=col)
-                    dg.ellipse([bx - 16, by - 16, bx + 16, by + 16], fill=tuple(int(c * 0.8) for c in col))
+                    dg.ellipse([bx - 15, by - 15, bx + 15, by + 15], fill=tuple(int(c * 0.75) for c in col))
 
-        sh = np.asarray(shadow.filter(ImageFilter.GaussianBlur(1.5)), np.float32)[..., None] / 255.0
-        b = np.asarray(body, np.float32) / 255.0
-        lights = (np.asarray(glow.filter(ImageFilter.GaussianBlur(6)), np.float32) / 255.0 * 0.9 +
-                  np.asarray(core.filter(ImageFilter.GaussianBlur(0.5)), np.float32) / 255.0)
-        return sh, b, lights
+        def pack(L):
+            sh = np.asarray(L["shadow"].filter(ImageFilter.GaussianBlur(1.4)), np.float32)[..., None] / 255.0
+            body = np.asarray(L["body"], np.float32) / 255.0
+            lights = (np.asarray(L["glow"].filter(ImageFilter.GaussianBlur(6)), np.float32) / 255.0 * 0.9 +
+                      np.asarray(L["core"].filter(ImageFilter.GaussianBlur(0.5)), np.float32) / 255.0)
+            return sh, body, lights
+
+        return pack(layers["g"]), pack(layers["t"])
 
 
 def _paste_clip(dst, src, px, py):
     x0, y0 = max(0, -px), max(0, -py)
-    if x0 >= src.width or y0 >= src.height:
+    if x0 >= src.width or y0 >= src.height or px >= dst.width or py >= dst.height:
         return
-    crop = src.crop((x0, y0, src.width, src.height))
-    if crop.width > 0 and crop.height > 0:
-        dst.alpha_composite(crop, (max(0, px), max(0, py)))
+    dst.alpha_composite(src.crop((x0, y0, src.width, src.height)), (max(0, px), max(0, py)))
+
+
+def _paste_l(dst, mask, px, py):
+    x0, y0 = max(0, -px), max(0, -py)
+    if x0 >= mask.width or y0 >= mask.height or px >= dst.width or py >= dst.height:
+        return
+    m = mask.crop((x0, y0, mask.width, mask.height))
+    dst.paste(255, (max(0, px), max(0, py), max(0, px) + m.width, max(0, py) + m.height), m)
 
 
 SEDAN_COLORS = [(22, 22, 26), (92, 18, 22), (150, 152, 160), (24, 34, 62), (58, 60, 66), (120, 98, 60)]
@@ -305,46 +464,36 @@ def car_sprite(kind, r):
     def R(x0, y0, x1, y1, fill, rad=2):
         d.rounded_rectangle([ox + x0 * S, oy + y0 * S, ox + x1 * S, oy + y1 * S], radius=rad * S, fill=fill)
 
-    if kind == "taxi":
-        paint = (222, 168, 34)
-    elif kind == "police":
-        paint = (16, 16, 20)
-    elif kind == "suv":
+    paint = {"taxi": (222, 168, 34), "police": (16, 16, 20), "truck": (178, 180, 186)}.get(kind)
+    if kind == "suv":
         paint = r.choice([(14, 14, 18), (30, 32, 38), (52, 20, 24)])
     elif kind == "sports":
         paint = r.choice([(200, 150, 30), (160, 20, 24), (230, 230, 236)])
-    elif kind == "truck":
-        paint = (178, 180, 186)
-    else:
+    elif paint is None:
         paint = r.choice(SEDAN_COLORS)
     hi = tuple(min(255, int(c * 1.35 + 18)) for c in paint)
     glass = (34, 44, 60)
-
     if kind == "truck":
-        R(0, 0, L * 0.72, Wd, paint, 1)                       # cargo box
+        R(0, 0, L * 0.72, Wd, paint, 1)
         R(0.6, 0.6, L * 0.72 - 0.6, 1.6, hi, 1)
-        R(L * 0.74, 0.5, L, Wd - 0.5, (60, 64, 74), 2)         # cab
+        R(L * 0.74, 0.5, L, Wd - 0.5, (60, 64, 74), 2)
         R(L * 0.86, 1.2, L * 0.96, Wd - 1.2, glass, 1)
     else:
         R(0, 0, L, Wd, paint, 3 if kind != "sports" else 3.5)
-        # roof / cabin
         c0, c1 = (L * 0.3, L * 0.72) if kind != "sports" else (L * 0.36, L * 0.68)
         if kind == "suv":
             c0, c1 = L * 0.22, L * 0.8
         R(c0, 1.1, c1, Wd - 1.1, glass, 1.5)
         R(c0 + L * 0.06, 1.6, c1 - L * 0.08, Wd - 1.6, hi if kind != "police" else (230, 230, 236), 1)
-        # hood highlight
         R(c1 + 0.8, 1.6, L - 1.4, 2.4, hi, 1)
         if kind == "police":
-            R(0, 0, L * 0.26, Wd, (230, 230, 236), 2)          # white doors front/back
+            R(0, 0, L * 0.26, Wd, (230, 230, 236), 2)
             R(L * 0.76, 0, L, Wd, (230, 230, 236), 2)
-            R(L * 0.46, 0.8, L * 0.54, Wd - 0.8, (40, 40, 48), 0.5)  # light bar
+            R(L * 0.46, 0.8, L * 0.54, Wd - 0.8, (40, 40, 48), 0.5)
         if kind == "taxi":
-            R(L * 0.45, Wd * 0.3, L * 0.56, Wd * 0.7, (250, 236, 170), 0.6)  # roof sign
-            for k in range(3):
-                R(L * 0.08 + k * 2.2, Wd - 1.1, L * 0.08 + k * 2.2 + 1.1, Wd - 0.2, (20, 20, 20), 0.2)
+            R(L * 0.45, Wd * 0.3, L * 0.56, Wd * 0.7, (250, 236, 170), 0.6)
         if kind == "sports":
-            R(L * 0.05, Wd * 0.44, L * 0.95, Wd * 0.56, (20, 20, 22), 0.3)  # racing stripe
+            R(L * 0.05, Wd * 0.44, L * 0.95, Wd * 0.56, (20, 20, 22), 0.3)
     img.info_len = L
     img.info_w = Wd
     return img
