@@ -140,7 +140,7 @@ class Traffic:
         if self.ring_only:
             self.routes = []
             self.flows = []
-            for off, gap in ((RING_W / 4, 70), (-RING_W / 4, 86)):
+            for off, gap in ((RING_W / 4, 86), (-RING_W / 4, 104)):
                 ring = Path()
                 rp = self.ring_lane(off)
                 ring.add(rp + [rp[0]], "ground", V_RING)
@@ -419,16 +419,16 @@ class Traffic:
             bl, bw = 54, 13
             dg.polygon([(hx + pxv * 2.5, hy + pyv * 2.5), (hx - pxv * 2.5, hy - pyv * 2.5),
                         (hx + ux * bl - pxv * bw, hy + uy * bl - pyv * bw), (hx + ux * bl + pxv * bw, hy + uy * bl + pyv * bw)],
-                       fill=(78, 68, 44))
+                       fill=(50, 44, 29))
             for side in (-spr.info_w / 2 + 1.2, spr.info_w / 2 - 1.2):
-                dc.ellipse([hx + pxv * side - 1.3, hy + pyv * side - 1.3, hx + pxv * side + 1.3, hy + pyv * side + 1.3], fill=(255, 250, 228))
+                dc.ellipse([hx + pxv * side - 1.3, hy + pyv * side - 1.3, hx + pxv * side + 1.3, hy + pyv * side + 1.3], fill=(214, 208, 190))
                 tx, ty = x - ux * hl + pxv * side, y - uy * hl + pyv * side
                 rr = 1.6 if brake else 1.1
-                dc.ellipse([tx - rr, ty - rr, tx + rr, ty + rr], fill=(255, 40, 28))
+                dc.ellipse([tx - rr, ty - rr, tx + rr, ty + rr], fill=(200, 34, 24))
                 gg = 7 if brake else 5
-                dg.ellipse([tx - gg, ty - gg, tx + gg, ty + gg], fill=(170, 18, 10) if brake else (110, 12, 6))
+                dg.ellipse([tx - gg, ty - gg, tx + gg, ty + gg], fill=(120, 14, 8) if brake else (72, 8, 4))
             if kind == "supercar":
-                dg.ellipse([x - 12, y - 12, x + 12, y + 12], fill=(120, 14, 14))
+                dg.ellipse([x - 11, y - 11, x + 11, y + 11], fill=(80, 10, 10))
 
         def pack(L):
             sh = np.asarray(L["shadow"].filter(ImageFilter.GaussianBlur(1.4)), np.float32)[..., None] / 255.0
