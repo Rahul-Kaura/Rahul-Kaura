@@ -43,6 +43,9 @@ def skyline(layer_scale, color, count_range, seed_off, windows):
         # keep the middle lower so the name reads cleanly
         if 230 < x < 970:
             h *= 0.42
+        # keep the moon clear: nothing under it rises past its lower edge
+        if x + w > 940 and x < 1090:
+            h = min(h, 95)
         kind = r.choice(["flat", "flat", "spire", "stepped", "gothic", "antenna"])
         paths.append(building_path(x, w, h, kind))
         if windows:
