@@ -542,7 +542,7 @@ def searchlights(CW, CH, phase):
 def main(src, dst):
     koi = Image.open(src)
     n = koi.n_frames
-    duration = koi.info.get("duration", 70)
+    duration = 110  # slower, calmer swim than git-koi's 70 ms
     W = koi.size[0]
 
     global MOON_NOISE
