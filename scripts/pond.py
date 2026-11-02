@@ -1,168 +1,393 @@
-"""Put the koi GIF in a pixel-art pond with looping ripples.
+"""Render the koi into an illuminated garden pond.
 
-Usage: python pond.py koi/koi.gif
-The pond is drawn at half resolution and scaled 2x with nearest-neighbour so it
-matches git-koi's pixel size. Ripples and sparkles loop with the koi's frames.
+Usage: python pond.py koi/koi.gif koi/pond.webp
+
+Takes git-koi's transparent swim GIF and composites every frame into a lit
+pond: animated caustics on the pond floor, a soft shadow under the koi, shaded
+rocks with moss, lily pads and lotus flowers floating above the koi, ripples,
+drifting petals, light rays and a vignette. Everything that moves loops with
+the koi's frames. Output is an animated WebP so the lighting keeps full color.
 """
 
 import math
 import random
 import sys
 
-from PIL import Image, ImageDraw
+import numpy as np
+from PIL import Image, ImageDraw, ImageFilter
 
-KEY = (255, 0, 255)
-S = 256  # pond canvas at koi pixel scale (GIF is 2x)
-CX, CY, R = 128, 128, 122
-
-WATER_DEEP = (14, 42, 58)
-WATER_MID = (20, 62, 78)
-WATER_EDGE = (34, 92, 102)
-STONES = [(92, 96, 104), (112, 116, 122), (74, 78, 88), (132, 128, 120)]
-PAD = (58, 128, 74)
-PAD_DARK = (40, 98, 58)
-PAD_LIGHT = (92, 160, 92)
-FLOWER = (244, 170, 196)
-FLOWER_CORE = (250, 214, 120)
-RIPPLE = (92, 150, 160)
-SPARKLE = (190, 228, 230)
+SS = 2  # supersampling for drawn shapes
+rng = random.Random(42)
+SPRITES = []
 
 
-def base_pond():
-    img = Image.new("RGB", (S, S), KEY)
-    px = img.load()
-    for y in range(S):
-        for x in range(S):
-            d = math.hypot(x - CX, y - CY)
-            if d <= R:
-                t = d / R
-                # stepped gradient, pixel-art style
-                if t < 0.55:
-                    c = WATER_DEEP
-                elif t < 0.85:
-                    c = WATER_MID
-                else:
-                    c = WATER_EDGE
-                # light dithering between bands
-                if 0.52 < t < 0.58 and (x + y) % 2 == 0:
-                    c = WATER_MID
-                if 0.82 < t < 0.88 and (x + y) % 2 == 0:
-                    c = WATER_EDGE if c == WATER_MID else WATER_MID
-                px[x, y] = c
-    # stone rim
-    rnd = random.Random(11)
-    d = ImageDraw.Draw(img)
+# ---------- helpers ----------
+
+def value_noise(size, cells, seed):
+    g = np.random.default_rng(seed).random((cells + 1, cells + 1)).astype(np.float32)
+    img = Image.fromarray((g * 255).astype(np.uint8)).resize((size, size), Image.BICUBIC)
+    return np.asarray(img, np.float32) / 255.0
+
+
+def fbm(size, seed, octaves=(4, 8, 16, 32), weights=(0.5, 0.25, 0.15, 0.1)):
+    out = np.zeros((size, size), np.float32)
+    for i, (c, w) in enumerate(zip(octaves, weights)):
+        out += w * value_noise(size, c, seed + i)
+    return out / sum(weights)
+
+
+def rgba_layer(size):
+    return Image.new("RGBA", (size * SS, size * SS), (0, 0, 0, 0))
+
+
+def down(layer, size):
+    return layer.resize((size, size), Image.LANCZOS)
+
+
+def over(dst, src):
+    a = src[..., 3:4]
+    dst[..., :3] = src[..., :3] * a + dst[..., :3] * (1 - a)
+    dst[..., 3:4] = a + dst[..., 3:4] * (1 - a)
+    return dst
+
+
+def arr(img):
+    return np.asarray(img.convert("RGBA"), np.float32) / 255.0
+
+
+# ---------- caustics ----------
+
+def caustic(W, t, scale=1.6):
+    y, x = np.mgrid[0:W, 0:W].astype(np.float32) / W
+    TAU = 6.28318
+    px = (x * scale * TAU) % TAU - 250.0
+    py = (y * scale * TAU) % TAU - 250.0
+    ix, iy = px.copy(), py.copy()
+    c = np.ones_like(px)
+    inten = 0.005
+    n_iter = 5
+    for n in range(n_iter):
+        tt = t * (1.0 - (3.5 / float(n + 1)))
+        nix = px + np.cos(tt - ix) + np.sin(tt + iy)
+        niy = py + np.sin(tt - iy) + np.cos(tt + ix)
+        ix, iy = nix, niy
+        dx = px / (np.sin(ix + tt) / inten + 1e-6)
+        dy = py / (np.cos(iy + tt) / inten + 1e-6)
+        c += 1.0 / np.sqrt(dx * dx + dy * dy + 1e-6)
+    c /= n_iter
+    c = 1.17 - np.power(np.clip(c, 0, None), 1.4)
+    return np.clip(np.power(np.abs(c), 8.0), 0, 1)
+
+
+def looping_caustic(W, phase, period=6.0):
+    t = phase * period
+    a = caustic(W, t + 20.0)
+    b = caustic(W, t - period + 20.0)
+    return a * (1 - phase) + b * phase
+
+
+# ---------- static scene ----------
+
+def wobble(a):
+    return 1 + math.sin(a * 3 + 0.7) * 0.025 + math.sin(a * 5 + 2.1) * 0.015 + math.sin(a * 9) * 0.008
+
+
+def pond_shape(W):
+    cx = cy = W / 2
+    base = W * 0.44
+    y, x = np.mgrid[0:W, 0:W].astype(np.float32)
+    ang = np.arctan2(y - cy, x - cx)
+    d = np.hypot(x - cx, y - cy)
+    wob = np.sin(ang * 3 + 0.7) * 0.025 + np.sin(ang * 5 + 2.1) * 0.015 + np.sin(ang * 9) * 0.008
+    return d, base * (1 + wob)
+
+
+def garden(W):
+    n = fbm(W, 3)
+    n2 = fbm(W, 9, octaves=(16, 32, 64), weights=(0.5, 0.3, 0.2))
+    g = np.stack([0.06 + 0.10 * n, 0.16 + 0.22 * n, 0.08 + 0.10 * n], -1)
+    g += (n2[..., None] - 0.5) * 0.08
+    img = Image.fromarray(np.clip(g * 255, 0, 255).astype(np.uint8)).convert("RGBA")
+    layer = rgba_layer(W)
+    d = ImageDraw.Draw(layer)
+    for _ in range(420):
+        x, y = rng.uniform(0, W), rng.uniform(0, W)
+        L = rng.uniform(18, 46)
+        a = rng.uniform(0, math.pi * 2)
+        shade = rng.uniform(0.6, 1.25)
+        col = (int(48 * shade), int(120 * shade), int(58 * shade), 235)
+        pts = []
+        for k in range(14):
+            u = k / 13
+            pts.append((u * L, math.sin(u * math.pi) * L * 0.28))
+        pts += [(u, -w) for (u, w) in reversed(pts)]
+        ca, sa = math.cos(a), math.sin(a)
+        d.polygon([((x + px * ca - py * sa) * SS, (y + px * sa + py * ca) * SS) for px, py in pts], fill=col)
+        d.line([(x * SS, y * SS), ((x + L * ca) * SS, (y + L * sa) * SS)],
+               fill=(int(90 * shade), int(170 * shade), int(90 * shade), 140), width=SS)
+    img.alpha_composite(down(layer, W).filter(ImageFilter.GaussianBlur(0.4)))
+    return arr(img)
+
+
+def water_base(W, d, r):
+    k = np.clip(d / r, 0, 1)[..., None]
+    deep = np.array([0.01, 0.17, 0.24])
+    shallow = np.array([0.10, 0.56, 0.60])
+    edge = np.array([0.36, 0.78, 0.66])
+    kk = k ** 1.6
+    col = deep * (1 - kk) + shallow * kk
+    e = np.clip((k - 0.85) / 0.15, 0, 1)
+    col = col * (1 - e) + edge * e
+    peb = fbm(W, 21, octaves=(24, 48, 96), weights=(0.4, 0.35, 0.25))
+    col = col * (0.82 + 0.3 * peb[..., None])
+    sand = fbm(W, 33, octaves=(6, 12), weights=(0.6, 0.4))
+    col += (sand[..., None] - 0.5) * np.array([0.08, 0.06, 0.02])
+    return col.astype(np.float32)
+
+
+def rock_layer(W):
+    layer = np.zeros((W, W, 4), np.float32)
+    cx = cy = W / 2
+    base = W * 0.44
+    moss = fbm(W, 55, octaves=(8, 16, 32), weights=(0.5, 0.3, 0.2))
+    rocks = []
     a = 0.0
-    while a < 2 * math.pi:
-        rr = rnd.randint(4, 7)
-        x = CX + (R + 2) * math.cos(a)
-        y = CY + (R + 2) * math.sin(a)
-        col = rnd.choice(STONES)
-        d.ellipse([x - rr, y - rr * 0.8, x + rr, y + rr * 0.8], fill=col)
-        d.point([(x - rr / 3, y - rr / 3)], fill=(160, 158, 152))
-        a += (rr * 1.6) / (R + 2)
-    return img
+    while a < math.pi * 2:
+        rr = rng.uniform(12, 22)
+        dist = base * wobble(a) + rr * rng.uniform(0.55, 0.85)
+        rocks.append((cx + dist * math.cos(a), cy + dist * math.sin(a), rr, rng.uniform(0.6, 0.95), rng.uniform(0, math.pi)))
+        a += rr * 1.25 / (base + rr)
+    a = 0.1
+    while a < math.pi * 2:
+        rr = rng.uniform(16, 28)
+        dist = base + rr * 1.6 + rng.uniform(4, 20)
+        rocks.append((cx + dist * math.cos(a), cy + dist * math.sin(a), rr, rng.uniform(0.6, 0.9), rng.uniform(0, math.pi)))
+        a += rr * 1.4 / (base + rr * 1.5)
+    rocks.sort(key=lambda r: -math.hypot(r[0] - cx, r[1] - cy))
+    light = np.array([-0.55, -0.65, 0.52])
+    light /= np.linalg.norm(light)
+    yy, xx = np.mgrid[0:W, 0:W].astype(np.float32)
+    for (x, y, rr, sq, rot) in rocks:
+        x0, x1 = int(max(0, x - rr - 2)), int(min(W, x + rr + 2))
+        y0, y1 = int(max(0, y - rr - 2)), int(min(W, y + rr + 2))
+        if x1 <= x0 or y1 <= y0:
+            continue
+        X = xx[y0:y1, x0:x1] - x
+        Y = yy[y0:y1, x0:x1] - y
+        c, s = math.cos(rot), math.sin(rot)
+        u = (X * c + Y * s) / rr
+        v = (-X * s + Y * c) / (rr * sq)
+        q = u * u + v * v
+        z = np.sqrt(np.clip(1 - q, 0, 1))
+        nx = u * c - v * s
+        ny = u * s + v * c
+        lam = np.clip(nx * light[0] + ny * light[1] + z * light[2], 0, 1)
+        tone = rng.uniform(0.85, 1.1)
+        col = np.array([0.50, 0.48, 0.44]) * tone * (0.25 + 0.95 * lam[..., None])
+        col = col + np.power(lam, 18)[..., None] * 0.25
+        m = moss[y0:y1, x0:x1]
+        mossy = (np.clip((m - 0.48) * 6, 0, 1) * np.clip(-ny * 1.2 + 0.2, 0, 1))[..., None]
+        moss_col = np.array([0.28, 0.48, 0.18]) * (0.5 + 0.7 * lam[..., None])
+        col = col * (1 - mossy) + moss_col * mossy
+        alpha = ((q < 1) * np.clip((1 - q) * 12, 0, 1))[..., None]
+        layer[y0:y1, x0:x1] = over(layer[y0:y1, x0:x1].copy(), np.concatenate([col, alpha], -1))
+    return layer
 
 
-def lily_pads(img):
-    d = ImageDraw.Draw(img)
-    pads = [(52, 58, 13, 30), (206, 196, 15, 210), (198, 64, 10, 120), (64, 204, 9, 300)]
-    for x, y, r, notch in pads:
-        d.ellipse([x - r, y - r, x + r, y + r], fill=PAD_DARK)
-        d.ellipse([x - r + 1, y - r + 1, x + r - 2, y + r - 2], fill=PAD)
-        a = math.radians(notch)
-        d.polygon(
-            [(x, y), (x + (r + 1) * math.cos(a - 0.35), y + (r + 1) * math.sin(a - 0.35)),
-             (x + (r + 1) * math.cos(a + 0.35), y + (r + 1) * math.sin(a + 0.35))],
-            fill=WATER_EDGE,
-        )
-        d.line([(x - r / 2, y - r / 3), (x + r / 4, y - r / 2)], fill=PAD_LIGHT)
-    # one flower
-    fx, fy = 206, 196
-    for ang in range(0, 360, 60):
-        a = math.radians(ang)
-        d.ellipse([fx + 3 * math.cos(a) - 2, fy + 3 * math.sin(a) - 2,
-                   fx + 3 * math.cos(a) + 2, fy + 3 * math.sin(a) + 2], fill=FLOWER)
-    d.rectangle([fx - 1, fy - 1, fx + 1, fy + 1], fill=FLOWER_CORE)
+PADS = [  # x, y, r, notch angle deg, flower
+    (110, 112, 30, 40, True),
+    (402, 386, 34, 220, True),
+    (408, 118, 22, 140, False),
+    (96, 392, 20, 320, False),
+    (150, 66, 15, 80, False),
+    (450, 300, 16, 190, False),
+]
 
 
-def water_fx(img, phase):
-    """Ripples and sparkles for a phase in [0, 1)."""
-    d = ImageDraw.Draw(img)
-    for (x, y, offset) in [(92, 150, 0.0), (168, 104, 0.5)]:
-        p = (phase + offset) % 1.0
-        r = 3 + p * 22
-        if p < 0.8:
-            d.ellipse([x - r, y - r * 0.6, x + r, y + r * 0.6], outline=RIPPLE)
-        r2 = r - 7
-        if 0.25 < p < 0.95 and r2 > 2:
-            d.ellipse([x - r2, y - r2 * 0.6, x + r2, y + r2 * 0.6], outline=WATER_EDGE)
-    rnd = random.Random(5)
-    for _ in range(18):
-        a = rnd.uniform(0, 2 * math.pi)
-        rr = rnd.uniform(10, R - 12)
-        x, y = CX + rr * math.cos(a), CY + rr * math.sin(a)
-        off = rnd.random()
-        v = (math.sin(2 * math.pi * (phase + off)) + 1) / 2
-        if v > 0.75:
-            d.point([(x, y)], fill=SPARKLE)
-            if v > 0.92:
-                d.point([(x - 1, y), (x + 1, y)], fill=RIPPLE)
+def pad_sprite(r, notch, flower):
+    S = int(r * 2 + 40)
+    lay = rgba_layer(S)
+    d = ImageDraw.Draw(lay)
+    c = S / 2
+
+    def P(x, y):
+        return (x * SS, y * SS)
+
+    a0 = math.radians(notch)
+    pts = []
+    for k in range(0, 361, 3):
+        a = math.radians(k)
+        da = (a - a0 + math.pi) % (2 * math.pi) - math.pi
+        if abs(da) < 0.22:
+            continue
+        rr = r * (1 + 0.03 * math.sin(a * 5))
+        pts.append(P(c + rr * math.cos(a), c + rr * math.sin(a)))
+    pts.append(P(c, c))
+    d.polygon(pts, fill=(52, 128, 62, 255))
+    sheen = rgba_layer(S)
+    d = ImageDraw.Draw(sheen)
+    for i in range(10):
+        f = 1 - i / 10
+        rr = r * 0.85 * f
+        o = r * 0.15 * (1 - f)
+        d.ellipse([*P(c - rr - o, c - rr - o), *P(c + rr - o, c + rr - o)], fill=(70 + i * 6, 150 + i * 6, 72 + i * 3, 28))
+    mask = lay.getchannel("A")
+    sheen.putalpha(Image.fromarray(np.minimum(np.asarray(sheen.getchannel("A")), np.asarray(mask))))
+    lay.alpha_composite(sheen)
+    veins = rgba_layer(S)
+    d = ImageDraw.Draw(veins)
+    for k in range(0, 360, 30):
+        a = math.radians(k)
+        da = (a - a0 + math.pi) % (2 * math.pi) - math.pi
+        if abs(da) < 0.3:
+            continue
+        d.line([P(c, c), P(c + r * 0.9 * math.cos(a), c + r * 0.9 * math.sin(a))], fill=(110, 180, 100, 110), width=SS)
+    lay.alpha_composite(veins)
+    d = ImageDraw.Draw(lay)
+    d.line(pts[:-1], fill=(30, 90, 44, 255), width=SS)
+    if flower:
+        fx, fy = c + r * 0.15, c - r * 0.1
+        for ring, (n, L, Wd, base_col, tip) in enumerate([
+            (8, r * 0.75, r * 0.32, (250, 236, 240), (236, 120, 160)),
+            (8, r * 0.58, r * 0.28, (255, 244, 246), (242, 150, 182)),
+            (6, r * 0.38, r * 0.22, (255, 250, 250), (248, 182, 204)),
+        ]):
+            off = ring * 0.4
+            for k in range(n):
+                a = 2 * math.pi * k / n + off
+                ca, sa = math.cos(a), math.sin(a)
+                for g in range(8):
+                    f = 1 - g / 8
+                    col = tuple(int(base_col[j] * (1 - f) + tip[j] * f) for j in range(3)) + (255,)
+                    LL, WW = L * f, Wd * f
+                    p2 = [(s / 15 * LL, math.sin(s / 15 * math.pi) ** 0.8 * WW / 2) for s in range(16)]
+                    p2 += [(u, -w) for (u, w) in reversed(p2)]
+                    d.polygon([P(fx + px * ca - py * sa, fy + px * sa + py * ca) for px, py in p2], fill=col)
+        d.ellipse([*P(fx - r * 0.13, fy - r * 0.13), *P(fx + r * 0.13, fy + r * 0.13)], fill=(250, 210, 90, 255))
+        d.ellipse([*P(fx - r * 0.06, fy - r * 0.08), *P(fx + r * 0.02, fy)], fill=(255, 240, 170, 255))
+    return down(lay, S)
 
 
-def main(path):
-    koi = Image.open(path)
+def pads_layer(W, phase):
+    img = Image.new("RGBA", (W, W), (0, 0, 0, 0))
+    shadow = Image.new("RGBA", (W, W), (0, 0, 0, 0))
+    for i, (x, y, r, notch, flower) in enumerate(PADS):
+        spr = SPRITES[i]
+        bob = 1.6 * math.sin(2 * math.pi * phase + i * 1.7)
+        sway = 1.2 * math.cos(2 * math.pi * phase + i * 2.3)
+        px, py = int(round(x - spr.width / 2 + sway)), int(round(y - spr.height / 2 + bob))
+        sh = Image.new("RGBA", spr.size, (0, 30, 30, 0))
+        sh.putalpha(spr.getchannel("A").point(lambda v: int(v * 0.45)))
+        shadow.alpha_composite(sh, (max(0, px + 7), max(0, py + 9)))
+        img.alpha_composite(spr, (max(0, px), max(0, py)))
+    return arr(img), arr(shadow.filter(ImageFilter.GaussianBlur(4)))
+
+
+PETALS = [(0.0, 150, 0.8), (0.33, 120, 1.3), (0.66, 175, 0.5)]
+
+
+def petals_layer(W, phase):
+    lay = rgba_layer(W)
+    d = ImageDraw.Draw(lay)
+    c = W / 2
+    for off, rad, rot in PETALS:
+        a = 2 * math.pi * (phase + off)
+        x = c + rad * math.cos(a) * 0.95
+        y = c + rad * math.sin(a + 0.6) * 0.8
+        ang = a * 2 + rot
+        L, Wd = 9, 5
+        pts = [(s / 11 * L - L / 2, math.sin(s / 11 * math.pi) * Wd / 2) for s in range(12)]
+        pts += [(u, -w) for (u, w) in reversed(pts)]
+        ca, sa = math.cos(ang), math.sin(ang)
+        d.polygon([((x + px * ca - py * sa) * SS, (y + px * sa + py * ca) * SS) for px, py in pts], fill=(246, 178, 200, 235))
+    return arr(down(lay, W))
+
+
+def ripples_layer(W, phase):
+    lay = rgba_layer(W)
+    d = ImageDraw.Draw(lay)
+    for (x, y, off) in [(190, 300, 0.0), (330, 210, 0.5), (260, 150, 0.25)]:
+        for ring in range(3):
+            p = (phase + off + ring * 0.12) % 1.0
+            r = 4 + p * 46
+            a = int(110 * (1 - p) ** 1.5)
+            if a <= 2:
+                continue
+            d.ellipse([(x - r) * SS, (y - r * 0.62) * SS, (x + r) * SS, (y + r * 0.62) * SS], outline=(220, 255, 250, a), width=SS)
+    return arr(down(lay, W))
+
+
+def light_rays(W, phase):
+    y, x = np.mgrid[0:W, 0:W].astype(np.float32) / W
+    s = x * 0.8 + y * 0.6
+    rays = (np.maximum(0, np.sin(s * 22 + 2 * math.pi * phase)) ** 6 * 0.5 +
+            np.maximum(0, np.sin(s * 9 - 2 * math.pi * phase + 1.3)) ** 8 * 0.5)
+    return rays * np.clip(1.2 - (x + y), 0, 1)
+
+
+def vignette(W):
+    y, x = np.mgrid[0:W, 0:W].astype(np.float32) / W - 0.5
+    d = np.sqrt(x * x + y * y) / 0.707
+    return np.clip(1 - 0.55 * d ** 2.2, 0, 1)
+
+
+# ---------- main ----------
+
+def main(src, dst):
+    koi = Image.open(src)
     n = koi.n_frames
     duration = koi.info.get("duration", 70)
-    W, H = koi.size
+    W = koi.size[0]
 
-    pond = base_pond()
+    SPRITES[:] = [pad_sprite(r, notch, fl) for (_, _, r, notch, fl) in PADS]
+
+    d, r = pond_shape(W)
+    inside = np.clip((r - d) / 2.0, 0, 1)[..., None]
+    bg = garden(W)
+    water = water_base(W, d, r)
+    rocks = rock_layer(W)
+    rsh = Image.fromarray((rocks[..., 3] * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(10))
+    rshadow = (np.asarray(rsh, np.float32) / 255.0)[..., None]
+    vig = vignette(W)[..., None]
+    depth = np.clip(d / r, 0, 1)[..., None]
+    warm = np.array([1.0, 0.92, 0.72], np.float32)
+    caus_col = np.array([0.85, 1.0, 0.95], np.float32)
+
     frames = []
     for i in range(n):
+        phase = i / n
         koi.seek(i)
-        k = koi.convert("RGBA")
-        bg = pond.copy()
-        water_fx(bg, i / n)
-        bg = bg.resize((W, H), Image.NEAREST).convert("RGBA")
-        bg.alpha_composite(k)
-        # lily pads float above the koi
-        top = Image.new("RGB", (S, S), KEY)
-        lily_pads(top)
-        top = top.resize((W, H), Image.NEAREST)
-        tp = top.load()
-        m = Image.new("L", (W, H), 0)
-        mp = m.load()
-        for y in range(H):
-            for x in range(W):
-                if tp[x, y] != KEY:
-                    mp[x, y] = 255
-        bg.paste(top, (0, 0), m)
-        frames.append(bg.convert("RGB"))
+        k = arr(koi)
 
-    # one shared palette, KEY reserved for transparency
-    sample = Image.new("RGB", (W, H * 4))
-    for j, idx in enumerate(range(0, n, max(1, n // 4))):
-        if j < 4:
-            sample.paste(frames[idx], (0, H * j))
-    pal = sample.quantize(colors=255, method=Image.Quantize.MEDIANCUT)
-    p = pal.getpalette()[: 255 * 3] + list(KEY)
-    pal.putpalette(p)
-    key_index = 255
+        cst = looping_caustic(W, phase)[..., None]
+        floor = water + cst * caus_col * (0.22 + 0.22 * depth)
 
-    out = []
-    for f in frames:
-        q = f.quantize(palette=pal, dither=Image.Dither.NONE)
-        qp = q.load()
-        fp = f.load()
-        for y in range(H):
-            for x in range(W):
-                if fp[x, y] == KEY:
-                    qp[x, y] = key_index
-        out.append(q)
+        ka = Image.fromarray((k[..., 3] * 255).astype(np.uint8))
+        ksh = np.asarray(ka.filter(ImageFilter.GaussianBlur(5)), np.float32) / 255.0
+        ksh = np.roll(np.roll(ksh, 14, 0), 10, 1)[..., None]
+        floor = floor * (1 - 0.55 * ksh)
 
-    out[0].save(path, save_all=True, append_images=out[1:], duration=duration,
-                loop=0, transparency=key_index, disposal=2, optimize=False)
+        kc = np.clip(k[..., :3] * 1.04, 0, 1) + cst * 0.07
+        ka3 = k[..., 3:4]
+        scene = floor * (1 - ka3) + kc * ka3
+
+        scene = scene * (1 - 0.35 * rshadow * inside)
+        pads, pshadow = pads_layer(W, phase)
+        scene = scene * (1 - pshadow[..., 3:4] * 0.9)
+        for lay in (ripples_layer(W, phase), petals_layer(W, phase), pads):
+            scene = scene * (1 - lay[..., 3:4]) + lay[..., :3] * lay[..., 3:4]
+
+        out = bg[..., :3] * (1 - inside) + scene * inside
+        out = out * (1 - rocks[..., 3:4]) + rocks[..., :3] * rocks[..., 3:4]
+
+        out = out + light_rays(W, phase)[..., None] * warm * 0.22
+        out = out * vig
+        out = (1 - np.exp(-out * 1.35)) / (1 - math.exp(-1.35))
+        frames.append(Image.fromarray(np.clip(out * 255, 0, 255).astype(np.uint8)))
+
+    frames[0].save(dst, save_all=True, append_images=frames[1:], duration=duration,
+                   loop=0, quality=82, method=4)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], sys.argv[2])

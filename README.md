@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="koi/koi.gif" width="512" alt="My koi, redrawn every night from my GitHub activity" />
+  <img src="koi/pond.webp" width="512" alt="My koi in its pond, redrawn every night from my GitHub activity" />
 </p>
 
 <p align="center"><sub>My koi is redrawn every night from my GitHub activity: languages color it, contributions grow it, streaks mark it.</sub></p>
