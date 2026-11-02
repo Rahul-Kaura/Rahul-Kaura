@@ -387,7 +387,7 @@ def vignette(W):
 
 # ---------- top-down night city around the pond ----------
 
-def city(CW, CH, cx, cy, park_r, traffic):
+def city(CW, CH, cx, cy, park_r, traffic, AX=0):
     """Static rooftops and streets, plus lists of lights that animate."""
     r = random.Random(1939)
     S2 = 2
@@ -432,6 +432,8 @@ def city(CW, CH, cx, cy, park_r, traffic):
             lamps.append((xx, y - SW / 2 + 2, r.random()))
 
     traffic.draw_ground(img, S2)
+    if AX:
+        draw_airport(img, CW, CH, AX, S2)
     rmask = traffic.road_mask(CW, CH, pad=6)
     d = ImageDraw.Draw(img)
 
@@ -452,6 +454,8 @@ def city(CW, CH, cx, cy, park_r, traffic):
             bx, by = (x0 + x1) / 2, (y0 + y1) / 2
             probes = [(bx, by), (x0, y0), (x1, y0), (x0, y1), (x1, y1), (bx, y0), (bx, y1), (x0, by), (x1, by)]
             if any(rmask[min(CH - 1, max(0, int(py_))), min(CW - 1, max(0, int(px_)))] for px_, py_ in probes):
+                continue
+            if x0 < AX or x1 > CW - AX:
                 continue
             roofs.append((x0, y0, x1, y1))
     for (x0, y0, x1, y1) in roofs:
@@ -488,6 +492,7 @@ def city(CW, CH, cx, cy, park_r, traffic):
             d.ellipse([S(tx - tr), S(ty - tr), S(tx + tr), S(ty + tr)], fill=(44, 34, 26))
             d.ellipse([S(tx - tr * 0.6), S(ty - tr * 0.7), S(tx + tr * 0.3), S(ty)], fill=(66, 52, 38))
     out = np.asarray(img.resize((CW, CH), Image.LANCZOS), np.float32) / 255.0
+    lamps = [l for l in lamps if AX + 4 < l[0] < CW - AX - 4]
     return out, windows, lamps, streets, xs, ys
 
 
@@ -631,6 +636,142 @@ def planes_layer(CW, CH, phase):
     return sh, b, lights
 
 
+# ---------- airport at both ends ----------
+
+RWY_W, TWY_W = 44, 16
+
+
+def airport_layout(CW, AX):
+    left = dict(rx=AX * 0.5, tx=AX * 0.5 + 62)
+    right = dict(rx=CW - AX * 0.5, tx=CW - AX * 0.5 - 62)
+    return left, right
+
+
+def draw_airport(img, CW, CH, AX, S):
+    d = ImageDraw.Draw(img)
+    ground = (9, 13, 12)
+    d.rectangle([0, 0, AX * S, CH * S], fill=ground)
+    d.rectangle([(CW - AX) * S, 0, CW * S, CH * S], fill=ground)
+    for side in airport_layout(CW, AX):
+        rx, tx = side["rx"], side["tx"]
+        # taxiway and links to the runway
+        d.rectangle([(tx - TWY_W / 2) * S, 0, (tx + TWY_W / 2) * S, CH * S], fill=(22, 23, 28))
+        d.line([(tx * S, 0), (tx * S, CH * S)], fill=(150, 120, 34), width=max(1, S // 2))
+        for y in (CH * 0.28, CH * 0.72):
+            d.polygon([((rx) * S, (y - 30) * S), ((tx) * S, (y - 4) * S), ((tx) * S, (y + 12) * S), ((rx) * S, (y - 14) * S)], fill=(22, 23, 28))
+        # runway
+        d.rectangle([(rx - RWY_W / 2) * S, 0, (rx + RWY_W / 2) * S, CH * S], fill=(26, 27, 32))
+        for xe in (rx - RWY_W / 2 + 1.5, rx + RWY_W / 2 - 1.5):
+            d.line([(xe * S, 0), (xe * S, CH * S)], fill=(150, 150, 156), width=S)
+        for y in range(0, CH, 34):
+            d.rectangle([(rx - 0.9) * S, y * S, (rx + 0.9) * S, (y + 18) * S], fill=(176, 176, 182))
+        # threshold piano keys and touchdown bars near each end
+        for y0 in (26, CH - 44):
+            for k in range(-4, 5):
+                if k == 0:
+                    continue
+                xk = rx + k * 4.2
+                d.rectangle([(xk - 1.3) * S, y0 * S, (xk + 1.3) * S, (y0 + 18) * S], fill=(176, 176, 182))
+        for y0 in (78, CH - 96):
+            for xo in (-12, 9):
+                d.rectangle([(rx + xo) * S, y0 * S, (rx + xo + 3) * S, (y0 + 18) * S], fill=(150, 150, 156))
+
+
+def airport_lights(CW, CH, AX):
+    glow = Image.new("RGB", (CW, CH), (0, 0, 0))
+    core = Image.new("RGB", (CW, CH), (0, 0, 0))
+    dg, dc = ImageDraw.Draw(glow), ImageDraw.Draw(core)
+
+    def lamp(x, y, col, g=5, r=1.1, k=0.45):
+        dg.ellipse([x - g, y - g, x + g, y + g], fill=tuple(int(c * k) for c in col))
+        dc.ellipse([x - r, y - r, x + r, y + r], fill=col)
+
+    for side in airport_layout(CW, AX):
+        rx, tx = side["rx"], side["tx"]
+        for y in range(8, CH, 40):
+            for xe in (rx - RWY_W / 2 - 3, rx + RWY_W / 2 + 3):
+                lamp(xe, y, (255, 246, 214))
+        for y in range(14, CH, 48):
+            for xe in (tx - TWY_W / 2 - 3, tx + TWY_W / 2 + 3):
+                lamp(xe, y, (70, 120, 255), g=4, r=1.0, k=0.5)
+        for k in range(-5, 6):
+            lamp(rx + k * 4, 18, (60, 255, 120), g=4, r=1.0)
+            lamp(rx + k * 4, CH - 18, (255, 60, 50), g=4, r=1.0)
+    g = np.asarray(glow.filter(ImageFilter.GaussianBlur(3)), np.float32) / 255.0
+    c = np.asarray(core.filter(ImageFilter.GaussianBlur(0.5)), np.float32) / 255.0
+    return g + c
+
+
+def airport_planes(CW, CH, AX, phase):
+    """A takeoff on the left runway and a landing on the right one, looping seamlessly."""
+    global PLANE
+    if PLANE is None:
+        PLANE = plane_sprite()
+    spr, L, span = PLANE
+    left, right = airport_layout(CW, AX)
+    body = Image.new("RGBA", (CW, CH), (0, 0, 0, 0))
+    shadow = Image.new("L", (CW, CH), 0)
+    glow = Image.new("RGB", (CW, CH), (0, 0, 0))
+    core = Image.new("RGB", (CW, CH), (0, 0, 0))
+    dg, dc = ImageDraw.Draw(glow), ImageDraw.Draw(core)
+    span_y = CH + 130
+    flights = []
+    # takeoff: rolls in slowly from the bottom, speeds up, lifts off near the top
+    t = phase
+    y = CH + 50 - span_y * t ** 1.55
+    alt = min(1.0, max(0.0, (CH * 0.45 - y) / (CH * 0.6)))
+    flights.append((left["rx"], y, -math.pi / 2, alt))
+    # landing: comes in high from the top, touches down, slows to a roll
+    t = (phase + 0.5) % 1.0
+    y = -80 + span_y * (1 - (1 - t) ** 1.55)
+    alt = min(1.0, max(0.0, (CH * 0.38 - y) / (CH * 0.5)))
+    flights.append((right["rx"], y, math.pi / 2, alt))
+    for (x, y, h, alt) in flights:
+        scale = 1.0 + 0.45 * alt
+        rot = spr.rotate(-math.degrees(h), resample=Image.BICUBIC, expand=True)
+        w, hh = int(rot.width / 3 * scale), int(rot.height / 3 * scale)
+        small = rot.resize((max(1, w), max(1, hh)), Image.LANCZOS)
+        px, py = int(x - w / 2), int(y - hh / 2)
+        a = small.getchannel("A").point(lambda v: int(v * (1 - 0.55 * alt)))
+        sx, sy = px + int(6 + 70 * alt), py + int(8 + 90 * alt)
+        sm = small.getchannel("A").resize((int(w / scale), int(hh / scale)), Image.LANCZOS).point(lambda v: int(v * (1 - 0.6 * alt)))
+        _paste_mask(shadow, sm, sx + (w - sm.width) // 2, sy + (hh - sm.height) // 2)
+        _paste_rgba(body, small, px, py)
+        ux, uy = math.cos(h), math.sin(h)
+        vx, vy = -uy, ux
+        Ls, Ss = L * scale, span * scale
+        wing = 17 * L / 58 * scale
+        for (lx, ly, col) in ((x + ux * (wing - Ls / 2) - vx * Ss / 2, y + uy * (wing - Ls / 2) - vy * Ss / 2, (255, 70, 60)),
+                              (x + ux * (wing - Ls / 2) + vx * Ss / 2, y + uy * (wing - Ls / 2) + vy * Ss / 2, (70, 255, 140)),
+                              (x - ux * Ls / 2, y - uy * Ls / 2, (255, 250, 235))):
+            dg.ellipse([lx - 7, ly - 7, lx + 7, ly + 7], fill=tuple(int(c * 0.45) for c in col))
+            dc.ellipse([lx - 1.4, ly - 1.4, lx + 1.4, ly + 1.4], fill=col)
+        nx, ny = x + ux * Ls / 2, y + uy * Ls / 2
+        bl, bw = 90, 26
+        dg.polygon([(nx - vx * 4, ny - vy * 4), (nx + vx * 4, ny + vy * 4),
+                    (nx + ux * bl + vx * bw, ny + uy * bl + vy * bw), (nx + ux * bl - vx * bw, ny + uy * bl - vy * bw)], fill=(70, 64, 46))
+    sh = np.asarray(shadow.filter(ImageFilter.GaussianBlur(5)), np.float32)[..., None] / 255.0
+    b = np.asarray(body, np.float32) / 255.0
+    lights = (np.asarray(glow.filter(ImageFilter.GaussianBlur(6)), np.float32) / 255.0 +
+              np.asarray(core.filter(ImageFilter.GaussianBlur(0.5)), np.float32) / 255.0)
+    return sh, b, lights
+
+
+def _paste_rgba(dst, src, px, py):
+    x0, y0 = max(0, -px), max(0, -py)
+    if x0 >= src.width or y0 >= src.height or px >= dst.width or py >= dst.height:
+        return
+    dst.alpha_composite(src.crop((x0, y0, src.width, src.height)), (max(0, px), max(0, py)))
+
+
+def _paste_mask(dst, mask, px, py):
+    x0, y0 = max(0, -px), max(0, -py)
+    if x0 >= mask.width or y0 >= mask.height or px >= dst.width or py >= dst.height:
+        return
+    m = mask.crop((x0, y0, mask.width, mask.height))
+    dst.paste(255, (max(0, px), max(0, py), max(0, px) + m.width, max(0, py) + m.height), m)
+
+
 # ---------- main ----------
 
 def main(src, dst):
@@ -662,9 +803,10 @@ def main(src, dst):
     OX, OY = (CW - W) // 2, (CH - W) // 2
     page = np.array([13, 17, 23], np.float32) / 255.0
     pcx, pcy = OX + W / 2, OY + W / 2
-    traffic = Traffic(CW, CH, pcx, pcy, n_frames=n)
+    traffic = Traffic(CW, CH, pcx, pcy, n_frames=n, ring_only=True)
+    AX = int(pcx - traffic.ra - RING_W / 2 - 14)
     park_r = 0
-    cityimg, windows, lamps, streets, sxs, sys_ = city(CW, CH, pcx, pcy, park_r, traffic)
+    cityimg, windows, lamps, streets, sxs, sys_ = city(CW, CH, pcx, pcy, park_r, traffic, AX)
     park = garden(max(CW, CH))[:CH, :CW, :3] * 0.8
     yy, xx = np.mgrid[0:CH, 0:CW].astype(np.float32)
     pd = np.hypot(xx - (OX + W / 2), yy - (OY + W / 2))
@@ -677,6 +819,7 @@ def main(src, dst):
     sd = traffic.ring_sdf_grid(xx, yy)
     parkmask = np.clip((-sd - RING_W / 2 - 3) / 16, 0, 1)[..., None]
     deck, deck_sh = traffic.deck_layer(CW, CH)
+    apt_lights = airport_lights(CW, CH, AX)
     da = deck[..., 3:4]
     plights = pond_lights(W)
     spot_col = np.array([1.0, 0.86, 0.52], np.float32)
@@ -764,7 +907,8 @@ def main(src, dst):
         ta_ = tbody[..., 3:4]
         out = out * (1 - ta_) + tbody[..., :3] * ta_
         out = out + tlights + beam * spot_col * 0.9
-        plane_sh, plane_body, plane_lights = planes_layer(CW, CH, phase)
+        out = out + apt_lights
+        plane_sh, plane_body, plane_lights = airport_planes(CW, CH, AX, phase)
         out = out * (1 - 0.35 * plane_sh)
         plane_a = plane_body[..., 3:4]
         out = out * (1 - plane_a) + plane_body[..., :3] * plane_a

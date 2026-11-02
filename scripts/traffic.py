@@ -83,7 +83,8 @@ class Path:
 
 
 class Traffic:
-    def __init__(self, CW, CH, cx, cy, n_frames, seed=1939):
+    def __init__(self, CW, CH, cx, cy, n_frames, seed=1939, ring_only=False):
+        self.ring_only = ring_only
         self.CW, self.CH, self.cx, self.cy, self.n = CW, CH, cx, cy, n_frames
         self.rng = random.Random(seed)
         self.ra, self.rb, self.rc = 345, 318, 150     # ring centreline half sizes, corner radius
@@ -136,6 +137,15 @@ class Traffic:
     # ---------- routes ----------
 
     def _build_routes(self):
+        if self.ring_only:
+            self.routes = []
+            self.flows = []
+            for off, gap in ((RING_W / 4, 70), (-RING_W / 4, 86)):
+                ring = Path()
+                rp = self.ring_lane(off)
+                ring.add(rp + [rp[0]], "ground", V_RING)
+                self.flows.append((ring.finish(), gap, 1))
+            return
         CW, CH, cx = self.CW, self.CH, self.cx
         HL, HR, yu, yl = self.HL, self.HR, self.y_up, self.y_lo
         out_lane, in_lane = RING_W / 4, -RING_W / 4
@@ -270,6 +280,8 @@ class Traffic:
         return out
 
     def elevated(self, x, kind):
+        if self.ring_only:
+            return False
         if kind == "ground":
             return False
         return abs(x - self.HL) <= DECK_W / 2 + 2 or abs(x - self.HR) <= DECK_W / 2 + 2
@@ -279,10 +291,11 @@ class Traffic:
     def road_mask(self, CW, CH, pad=10):
         m = Image.new("L", (CW, CH), 0)
         d = ImageDraw.Draw(m)
-        for y in (self.y_up, self.y_lo):
-            d.rectangle([0, y - ST_W / 2 - pad, CW, y + ST_W / 2 + pad], fill=255)
-        for x in (self.HL, self.HR):
-            d.rectangle([x - DECK_W / 2 - pad, 0, x + DECK_W / 2 + pad, CH], fill=255)
+        if not self.ring_only:
+            for y in (self.y_up, self.y_lo):
+                d.rectangle([0, y - ST_W / 2 - pad, CW, y + ST_W / 2 + pad], fill=255)
+            for x in (self.HL, self.HR):
+                d.rectangle([x - DECK_W / 2 - pad, 0, x + DECK_W / 2 + pad, CH], fill=255)
         for path in self.routes:
             pts = [(float(px), float(py)) for (px, py), k in zip(path.P, path.kind) if k == "ramp"]
             if len(pts) > 1:
@@ -295,7 +308,7 @@ class Traffic:
         d = ImageDraw.Draw(img)
         asphalt, edge, gold = (17, 18, 23), (48, 49, 56), (150, 112, 30)
         CW, CH = self.CW, self.CH
-        for y in (self.y_up, self.y_lo):
+        for y in (() if self.ring_only else (self.y_up, self.y_lo)):
             d.rectangle([0, (y - ST_W / 2) * S, CW * S, (y + ST_W / 2) * S], fill=asphalt)
             for yy in (y - ST_W / 2, y + ST_W / 2):
                 d.line([(0, yy * S), (CW * S, yy * S)], fill=edge, width=S)
@@ -329,6 +342,8 @@ class Traffic:
                         ((x + ux * 13 + px * o) * S, (y + uy * 13 + py * o) * S)], fill=(64, 66, 74), width=S)
 
     def deck_layer(self, CW, CH):
+        if self.ring_only:
+            return np.zeros((CH, CW, 4), np.float32), np.zeros((CH, CW, 1), np.float32)
         S = 2
         lay = Image.new("RGBA", (CW * S, CH * S), (0, 0, 0, 0))
         sh = Image.new("L", (CW * S, CH * S), 0)
@@ -357,6 +372,8 @@ class Traffic:
         return np.asarray(lay, np.float32) / 255.0, np.asarray(sh, np.float32)[..., None] / 255.0
 
     def deck_lamps(self):
+        if self.ring_only:
+            return []
         return [(x, y) for x in (self.HL, self.HR) for y in range(20, self.CH, 72)]
 
     # ---------- per frame ----------
