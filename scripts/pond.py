@@ -16,6 +16,8 @@ import sys
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
+from traffic import Traffic, ROAD_W, RING_W
+
 SS = 2  # supersampling for drawn shapes
 rng = random.Random(42)
 SPRITES = []
@@ -385,7 +387,7 @@ def vignette(W):
 
 # ---------- top-down night city around the pond ----------
 
-def city(CW, CH, cx, cy, park_r):
+def city(CW, CH, cx, cy, park_r, traffic):
     """Static rooftops and streets, plus lists of lights that animate."""
     r = random.Random(1939)
     S2 = 2
@@ -429,6 +431,9 @@ def city(CW, CH, cx, cy, park_r):
         for xx in range(int(r.uniform(0, 80)), CW, 120):
             lamps.append((xx, y - SW / 2 + 2, r.random()))
 
+    traffic.draw_roads(img, S2)
+    d = ImageDraw.Draw(img)
+
     def split(x0, y0, x1, y1, depth):
         w, h = x1 - x0, y1 - y0
         if depth > 2 or (w < 70 and h < 70) or r.random() < 0.18 * depth:
@@ -444,7 +449,10 @@ def city(CW, CH, cx, cy, park_r):
     for b in blocks:
         for (x0, y0, x1, y1) in split(*b, 0):
             bx, by = (x0 + x1) / 2, (y0 + y1) / 2
-            if math.hypot(bx - cx, by - cy) < park_r + 30:
+            probes = [(bx, by), (x0, y0), (x1, y0), (x0, y1), (x1, y1), (bx, y0), (bx, y1), (x0, by), (x1, by)]
+            if min(traffic.corridor_dist(px_, py_) for px_, py_ in probes) < ROAD_W / 2 + 5:
+                continue
+            if min(math.hypot(px_ - cx, py_ - cy) for px_, py_ in probes) < traffic.R + RING_W / 2 + 6:
                 continue
             roofs.append((x0, y0, x1, y1))
     for (x0, y0, x1, y1) in roofs:
@@ -500,44 +508,9 @@ def city_lights(CW, CH, phase, windows, lamps, xs, ys):
         f = 0.85 + 0.15 * math.sin(2 * math.pi * (phase * 2 + off))
         dg.ellipse([lx - 7, ly - 7, lx + 7, ly + 7], fill=int(120 * f))
         dc.ellipse([lx - 1.5, ly - 1.5, lx + 1.5, ly + 1.5], fill=(255, 228, 150))
-    red = Image.new("L", (CW, CH), 0)
-    dr = ImageDraw.Draw(red)
-    body = Image.new("RGBA", (CW, CH), (0, 0, 0, 0))
-    db = ImageDraw.Draw(body)
-    for (kind, k, off, speed, sgn) in CARS:
-        line = xs[k] if kind == "v" else ys[k]
-        pos = (phase * speed + off) % 1.0
-        pos = pos if sgn > 0 else 1 - pos
-        lane = 4.5 * sgn
-        if kind == "v":
-            x, y = line + lane, pos * (CH + 80) - 40
-            ux, uy = 0, sgn
-        else:
-            x, y = pos * (CW + 80) - 40, line + lane
-            ux, uy = sgn, 0
-        px, py = -uy, ux  # perpendicular
-        L, Wd = 7, 3.6
-        corners = [(x + ux * L + px * Wd, y + uy * L + py * Wd), (x + ux * L - px * Wd, y + uy * L - py * Wd),
-                   (x - ux * L - px * Wd, y - uy * L - py * Wd), (x - ux * L + px * Wd, y - uy * L + py * Wd)]
-        db.polygon(corners, fill=(22, 24, 30, 255))
-        db.polygon([(x + ux * 2 + px * 2.6, y + uy * 2 + py * 2.6), (x + ux * 2 - px * 2.6, y + uy * 2 - py * 2.6),
-                    (x - ux * 3 - px * 2.6, y - uy * 3 - py * 2.6), (x - ux * 3 + px * 2.6, y - uy * 3 + py * 2.6)],
-                   fill=(52, 56, 68, 255))
-        # headlight beam
-        hx, hy = x + ux * L, y + uy * L
-        bl, bw = 70, 16
-        dg.polygon([(hx + px * 3, hy + py * 3), (hx - px * 3, hy - py * 3),
-                    (hx + ux * bl - px * bw, hy + uy * bl - py * bw), (hx + ux * bl + px * bw, hy + uy * bl + py * bw)], fill=140)
-        dg.ellipse([hx - 5, hy - 5, hx + 5, hy + 5], fill=255)
-        for side in (-2.2, 2.2):
-            dc.ellipse([hx + px * side - 1.6, hy + py * side - 1.6, hx + px * side + 1.6, hy + py * side + 1.6], fill=(255, 250, 225))
-            tx, ty = x - ux * L + px * side, y - uy * L + py * side
-            dc.ellipse([tx - 1.3, ty - 1.3, tx + 1.3, ty + 1.3], fill=(255, 50, 36))
-            dr.ellipse([tx - 6, ty - 6, tx + 6, ty + 6], fill=200)
     g = np.asarray(glow.filter(ImageFilter.GaussianBlur(5)), np.float32)[..., None] / 255.0
     c = np.asarray(core.filter(ImageFilter.GaussianBlur(0.5)), np.float32) / 255.0
-    rg = np.asarray(red.filter(ImageFilter.GaussianBlur(4)), np.float32)[..., None] / 255.0
-    return g * np.array([1.0, 0.82, 0.45], np.float32) * 0.75 + rg * np.array([1.0, 0.12, 0.08], np.float32) * 0.6 + c, arr(body)
+    return g * np.array([1.0, 0.82, 0.45], np.float32) * 0.75 + c
 
 
 def searchlights(CW, CH, phase):
@@ -583,12 +556,10 @@ def main(src, dst):
     CW, CH = 960, 640
     OX, OY = (CW - W) // 2, (CH - W) // 2
     page = np.array([13, 17, 23], np.float32) / 255.0
-    park_r = 300
     pcx, pcy = OX + W / 2, OY + W / 2
-    cityimg, windows, lamps, streets, sxs, sys_ = city(CW, CH, pcx, pcy, park_r)
-    cr = random.Random(77)
-    CARS[:] = [("v" if cr.random() < 0.5 else "h", 0, cr.random(), cr.choice([1, 1, 2, 2, 3]), cr.choice([-1, 1])) for _ in range(24)]
-    CARS[:] = [(kd, cr.randrange(len(sxs) if kd == "v" else len(sys_)), o, sp, sg) for (kd, _, o, sp, sg) in CARS]
+    traffic = Traffic(CW, CH, pcx, pcy, ring_r=292, n_frames=n)
+    park_r = traffic.R - RING_W / 2 - 2
+    cityimg, windows, lamps, streets, sxs, sys_ = city(CW, CH, pcx, pcy, park_r, traffic)
     park = garden(max(CW, CH))[:CH, :CW, :3] * 0.8
     yy, xx = np.mgrid[0:CH, 0:CW].astype(np.float32)
     pd = np.hypot(xx - (OX + W / 2), yy - (OY + W / 2))
@@ -598,7 +569,7 @@ def main(src, dst):
     e = (ex ** 4 + ey ** 4) ** 0.25
     t = np.clip((e - 0.80) / (0.995 - 0.80), 0, 1)
     edge_fade = (t * t * (3 - 2 * t))[..., None]
-    parkmask = np.clip((park_r - pd) / 30, 0, 1)[..., None]
+    parkmask = np.clip((park_r - pd) / 18, 0, 1)[..., None]
     outer = park * parkmask + cityimg * (1 - parkmask)
     shade = np.ones_like(parkmask)
 
@@ -669,10 +640,12 @@ def main(src, dst):
         f = feather[OY:OY + W, OX:OX + W]
         out[OY:OY + W, OX:OX + W] = sq * f + region * (1 - f)
         out = out * shade
-        lights, cars = city_lights(CW, CH, phase, windows, lamps, sxs, sys_)
-        ca = cars[..., 3:4] * (1 - parkmask)
-        out = out * (1 - ca) + cars[..., :3] * ca
-        lights = lights * (1 - parkmask)
+        lights = city_lights(CW, CH, phase, windows, lamps, sxs, sys_) * (1 - parkmask)
+        csh, cbody, clights = traffic.frame(i)
+        out = out * (1 - 0.6 * csh)
+        ca = cbody[..., 3:4]
+        out = out * (1 - ca) + cbody[..., :3] * ca
+        lights = lights + clights
         out = out + lights + searchlights(CW, CH, phase) * np.array([0.95, 0.82, 0.5], np.float32) * (1 - parkmask * 0.7)
         out = out + fireflies_canvas(CW, CH, phase)[..., None] * gold
         out = (1 - np.exp(-out * 1.6)) / (1 - math.exp(-1.6))
