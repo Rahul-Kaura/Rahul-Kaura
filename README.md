@@ -25,14 +25,24 @@
   <img src="https://skillicons.dev/icons?i=py,ts,js,react,nodejs,docker,kubernetes,postgres,git,linux,githubactions&perline=11" alt="Tech stack" />
 </p>
 
+## Research
+
+Technical reports from my production work. Each one is grounded in published research, with 27 arXiv papers among its references.
+
+| Report | Context |
+| --- | --- |
+| [Structure-Preserving Document Ingestion for Enterprise RAG](https://fde-portfolio.onrender.com/#paper-ingestion) | Uniphore, 2026. Parsing heterogeneous files into a document tree, schema-validated summaries and path-aware chunks, plus a benchmark of graph vs. transformer parsers. |
+| [Declarative Secret Delivery for AI Microservices on Kubernetes](https://fde-portfolio.onrender.com/#paper-secrets) | Uniphore, 2026. External Secrets Operator for encrypted credentials, zero-downtime rotation and per-service failure isolation. |
+| [Agentic Incident Response with Change-Aware Anomaly Detection](https://fde-portfolio.onrender.com/#paper-incident) | Empirik AI, 2025. A LangGraph agent that detects abnormal changes with Isolation Forest, correlates Kubernetes, Datadog and LogicMonitor signals, and gates automated rollback. |
+
 ## Projects
 
 | Project | What it is |
 | --- | --- |
-| [driftguard](https://github.com/Rahul-Kaura/driftguard-) | Infrastructure drift detection |
-| [fieldrag](https://github.com/Rahul-Kaura/fieldrag) | Retrieval-augmented generation for field data |
-| [Infrastructure Compliance Scanner](https://github.com/Rahul-Kaura/InfrastructureComplianceScanner) | TypeScript compliance scanner with AI-assisted config drafting |
-| [fde-portfolio](https://github.com/Rahul-Kaura/fde-portfolio) | My FDE portfolio site |
+| [driftguard](https://github.com/Rahul-Kaura/driftguard-) | Pre-deploy change risk for Kubernetes. Builds a dependency graph from manifest diffs, computes blast radius, and returns approve, review or block. |
+| [fieldrag](https://github.com/Rahul-Kaura/fieldrag) | Offline document retrieval with citations. Structure-aware chunks find the right passage first 96% of the time vs. 77% for fixed windows, with no network access. |
+| [Infrastructure Compliance Scanner](https://github.com/Rahul-Kaura/InfrastructureComplianceScanner) | TypeScript compliance scanner with AI-assisted config drafting. |
+| [fde-portfolio](https://fde-portfolio.onrender.com/) | My FDE portfolio: deployments, research and builds. |
 
 ## Activity
 

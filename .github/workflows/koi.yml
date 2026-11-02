@@ -6,7 +6,7 @@ on:
     - cron: "20 0 * * *"
   workflow_dispatch:
   push:
-    paths: [.github/workflows/koi.yml]
+    paths: [.github/workflows/koi.yml, scripts/pond.py]
 
 permissions:
   contents: write
@@ -56,6 +56,10 @@ jobs:
           bin=_gitkoi/target/release/git-koi
           $bin collect "${{ github.repository_owner }}" --output "$RUNNER_TEMP/snapshot.json"
           $bin render "$RUNNER_TEMP/snapshot.json" --output-dir koi --body tea
+      - name: Put the koi in its pond
+        run: |
+          python3 -m pip install --quiet --break-system-packages pillow
+          python3 scripts/pond.py koi/koi.gif
       - name: Commit the koi if it changed
         shell: bash
         run: |
