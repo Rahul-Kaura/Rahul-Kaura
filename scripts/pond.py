@@ -357,6 +357,25 @@ def fireflies(W, phase):
     return glow * 0.55 + c
 
 
+CANVAS_FLIES = [(rng.uniform(20, 900), rng.uniform(20, 540), rng.uniform(6, 22), rng.random(), rng.choice([1, 2])) for _ in range(34)]
+
+
+def fireflies_canvas(CW, CH, phase):
+    lay = Image.new("L", (CW, CH), 0)
+    core = Image.new("L", (CW, CH), 0)
+    d, dc = ImageDraw.Draw(lay), ImageDraw.Draw(core)
+    for (x, y, rad, off, k) in CANVAS_FLIES:
+        a = 2 * math.pi * (phase * k + off)
+        fx, fy = x + rad * math.cos(a), y + rad * 0.6 * math.sin(2 * a)
+        tw = 0.5 + 0.5 * math.sin(2 * math.pi * (phase * 3 + off))
+        b = int(255 * (0.25 + 0.75 * tw))
+        d.ellipse([fx - 7, fy - 7, fx + 7, fy + 7], fill=b)
+        dc.ellipse([fx - 1.6, fy - 1.6, fx + 1.6, fy + 1.6], fill=b)
+    glow = np.asarray(lay.filter(ImageFilter.GaussianBlur(6)), np.float32) / 255.0
+    c = np.asarray(core.filter(ImageFilter.GaussianBlur(0.8)), np.float32) / 255.0
+    return glow * 0.55 + c
+
+
 def vignette(W):
     y, x = np.mgrid[0:W, 0:W].astype(np.float32) / W - 0.5
     d = np.sqrt(x * x + y * y) / 0.707
@@ -389,6 +408,48 @@ def main(src, dst):
     gold = np.array([1.0, 0.76, 0.22], np.float32)
     moon_col = np.array([0.80, 0.88, 1.0], np.float32)
 
+    # wide canvas: the pond sits in a night garden that fades into the page
+    CW, CH = 920, 560
+    OX, OY = (CW - W) // 2, (CH - W) // 2
+    page = np.array([13, 17, 23], np.float32) / 255.0
+    outer = garden(CW)[:CH, :, :3] * 0.8
+    yy, xx = np.mgrid[0:CH, 0:CW].astype(np.float32)
+    pd = np.hypot(xx - (OX + W / 2), yy - (OY + W / 2))
+    feather = np.clip((256 - pd) / 34, 0, 1)[..., None]
+    ex = (xx - CW / 2) / (CW / 2)
+    ey = (yy - CH / 2) / (CH / 2)
+    e = (ex ** 4 + ey ** 4) ** 0.25
+    t = np.clip((e - 0.62) / (0.99 - 0.62), 0, 1)
+    edge_fade = (t * t * (3 - 2 * t))[..., None]
+    shade = np.clip(1 - 0.5 * np.clip((pd - 230) / 260, 0, 1), 0, 1)[..., None]
+
+    # koi centroids for the sparkle trail
+    cents = []
+    for i in range(n):
+        koi.seek(i)
+        a = np.asarray(koi.convert("RGBA"))[..., 3] > 0
+        ys, xs = np.nonzero(a)
+        cents.append((xs.mean(), ys.mean()) if len(xs) else (W / 2, W / 2))
+
+    def trail(i, phase):
+        lay = Image.new("L", (W, W), 0)
+        core = Image.new("L", (W, W), 0)
+        dl, dc = ImageDraw.Draw(lay), ImageDraw.Draw(core)
+        tr = random.Random(7)
+        for back in range(3, 26):
+            cx, cy = cents[(i - back) % n]
+            fade = (1 - back / 26) ** 1.5
+            for _ in range(2):
+                jx, jy = tr.uniform(-16, 16), tr.uniform(-16, 16)
+                tw = 0.5 + 0.5 * math.sin(back * 1.9 + phase * 12.566)
+                b = int(255 * fade * (0.35 + 0.65 * tw))
+                rr = 1.0 + 1.6 * fade
+                dc.ellipse([cx + jx - rr, cy + jy - rr, cx + jx + rr, cy + jy + rr], fill=b)
+                dl.ellipse([cx + jx - 6, cy + jy - 6, cx + jx + 6, cy + jy + 6], fill=int(b * 0.6))
+        g = np.asarray(lay.filter(ImageFilter.GaussianBlur(5)), np.float32) / 255.0
+        c = np.asarray(core.filter(ImageFilter.GaussianBlur(0.7)), np.float32) / 255.0
+        return (g * 0.6 + c)[..., None]
+
     frames = []
     for i in range(n):
         phase = i / n
@@ -403,11 +464,15 @@ def main(src, dst):
         ksh = np.roll(np.roll(ksh, 14, 0), 10, 1)[..., None]
         floor = floor * (1 - 0.6 * ksh)
 
-        kc = np.clip(k[..., :3] * 1.08, 0, 1) + cst * caus_col * 0.06
+        kc = np.clip(k[..., :3] * 1.1, 0, 1) + cst * caus_col * 0.06
         ka3 = k[..., 3:4]
-        aura = np.asarray(ka.filter(ImageFilter.GaussianBlur(9)), np.float32)[..., None] / 255.0
-        floor = floor + aura * gold * 0.22
+        pulse = 0.78 + 0.22 * math.sin(2 * math.pi * phase * 3)
+        inner = np.asarray(ka.filter(ImageFilter.GaussianBlur(4)), np.float32)[..., None] / 255.0
+        outer_glow = np.asarray(ka.filter(ImageFilter.GaussianBlur(18)), np.float32)[..., None] / 255.0
+        floor = floor + outer_glow * gold * 0.45 * pulse
         scene = floor * (1 - ka3) + kc * ka3
+        scene = scene + (inner * 0.55 + outer_glow * 0.5) * gold * pulse * (1 - ka3 * 0.85)
+        scene = scene + trail(i, phase) * np.array([1.0, 0.85, 0.45], np.float32)
         scene = scene + moon_glint(W, phase)[..., None] * moon_col * 0.38 * (1 - ka3)
 
         scene = scene * (1 - 0.35 * rshadow * inside)
@@ -416,13 +481,18 @@ def main(src, dst):
         for lay in (ripples_layer(W, phase), petals_layer(W, phase), pads):
             scene = scene * (1 - lay[..., 3:4]) + lay[..., :3] * lay[..., 3:4]
 
-        out = bg[..., :3] * (1 - inside) + scene * inside
-        out = out * (1 - rocks[..., 3:4]) + rocks[..., :3] * rocks[..., 3:4]
+        sq = bg[..., :3] * (1 - inside) + scene * inside
+        sq = sq * (1 - rocks[..., 3:4]) + rocks[..., :3] * rocks[..., 3:4]
+        sq = sq + light_rays(W, phase)[..., None] * warm * 0.05
 
-        out = out + light_rays(W, phase)[..., None] * warm * 0.05
-        out = out * vig
-        out = out + fireflies(W, phase)[..., None] * gold
+        out = outer.copy()
+        region = out[OY:OY + W, OX:OX + W]
+        f = feather[OY:OY + W, OX:OX + W]
+        out[OY:OY + W, OX:OX + W] = sq * f + region * (1 - f)
+        out = out * shade
+        out = out + fireflies_canvas(CW, CH, phase)[..., None] * gold
         out = (1 - np.exp(-out * 1.6)) / (1 - math.exp(-1.6))
+        out = out * (1 - edge_fade) + page * edge_fade
         frames.append(Image.fromarray(np.clip(out * 255, 0, 255).astype(np.uint8)))
 
     frames[0].save(dst, save_all=True, append_images=frames[1:], duration=duration,

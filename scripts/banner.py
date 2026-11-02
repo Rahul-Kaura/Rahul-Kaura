@@ -119,7 +119,11 @@ def main(f900, f700, out):
 <filter id="textGlow" x="-10%" y="-40%" width="120%" height="180%"><feGaussianBlur stdDeviation="6" result="b"/><feColorMatrix in="b" values="1 0 0 0 0.35  0 .8 0 0 .22  0 0 .2 0 0  0 0 0 .55 0"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
 <filter id="ripple"><feTurbulence type="fractalNoise" baseFrequency="0.004 0.09" numOctaves="2" seed="4"/><feDisplacementMap in="SourceGraphic" scale="9"/></filter>
 <filter id="soft" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="14"/></filter>
-<clipPath id="frame"><rect width="{W}" height="{H}" rx="18"/></clipPath>
+<clipPath id="frame"><rect width="{W}" height="{H}"/></clipPath>
+<linearGradient id="fadeB" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0d1117" stop-opacity="0"/><stop offset="1" stop-color="#0d1117"/></linearGradient>
+<linearGradient id="fadeL" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0d1117"/><stop offset="1" stop-color="#0d1117" stop-opacity="0"/></linearGradient>
+<linearGradient id="fadeR" x1="1" y1="0" x2="0" y2="0"><stop offset="0" stop-color="#0d1117"/><stop offset="1" stop-color="#0d1117" stop-opacity="0"/></linearGradient>
+<linearGradient id="fadeT" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#0d1117" stop-opacity="0"/><stop offset="1" stop-color="#0d1117"/></linearGradient>
 </defs>
 <g clip-path="url(#frame)">
 <rect width="{W}" height="{H}" fill="url(#sky)"/>
@@ -143,12 +147,15 @@ def main(f900, f700, out):
 <g filter="url(#soft)"><rect x="985" y="{HORIZON + 4}" width="40" height="{H - HORIZON - 30}" fill="#dfe6ff" opacity=".28" style="animation:pulse 5s ease-in-out infinite"/></g>
 {shimmer}
 {flies}
-<line x1="0" y1="{HORIZON}" x2="{W}" y2="{HORIZON}" stroke="#e3b341" stroke-opacity=".35"/>
+<line x1="120" y1="{HORIZON}" x2="{W - 120}" y2="{HORIZON}" stroke="#e3b341" stroke-opacity=".25"/>
 <ellipse cx="600" cy="138" rx="430" ry="70" fill="#020306" opacity=".55" filter="url(#soft)"/>
+<rect x="0" y="{H - 95}" width="{W}" height="95" fill="url(#fadeB)"/>
+<rect x="0" y="0" width="90" height="{H}" fill="url(#fadeL)"/>
+<rect x="{W - 90}" y="0" width="90" height="{H}" fill="url(#fadeR)"/>
+<rect x="0" y="0" width="{W}" height="30" fill="url(#fadeT)"/>
 <text class="t" x="600" y="128" text-anchor="middle" filter="url(#textGlow)">RAHUL KAURA</text>
 <text class="s" x="600" y="170" text-anchor="middle">FORWARD DEPLOYED ENGINEER · UNIPHORE</text>
 </g>
-<rect x=".5" y=".5" width="{W - 1}" height="{H - 1}" rx="18" fill="none" stroke="#e3b341" stroke-opacity=".35"/>
 </svg>'''
     open(out, "w").write(svg)
 

@@ -1,13 +1,9 @@
 <p align="center">
-  <img src="assets/banner.svg" width="100%" alt="Rahul Kaura, Forward Deployed Engineer at Uniphore" />
+  <img src="assets/banner.svg" width="100%" alt="Rahul Kaura, Forward Deployed Engineer at Uniphore" /><br/><img src="koi/pond.webp" width="100%" alt="My koi in its pond, redrawn every night from my GitHub activity" />
 </p>
 
 <p align="center">
   <img src="https://readme-typing-svg.demolab.com?font=Orbitron&weight=700&size=22&duration=3000&pause=900&color=E3B341&center=true&vCenter=true&width=900&height=50&letterSpacing=2px&lines=INFRASTRUCTURE+%E2%80%A2+OBSERVABILITY+%E2%80%A2+AI+AGENTS;RAG+%E2%80%A2+DOCUMENT+PARSING+%E2%80%A2+EVALS;SHIPPING+AI+INTO+REAL+ENVIRONMENTS" alt="Focus areas" />
-</p>
-
-<p align="center">
-  <img src="koi/pond.webp" width="512" alt="My koi in its pond, redrawn every night from my GitHub activity" />
 </p>
 
 <p align="center"><sub>My koi is redrawn every night from my GitHub activity: languages color it, contributions grow it, streaks mark it.</sub></p>
