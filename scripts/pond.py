@@ -382,6 +382,161 @@ def vignette(W):
     return np.clip(1 - 0.75 * d ** 2.0, 0, 1)
 
 
+
+# ---------- top-down night city around the pond ----------
+
+def city(CW, CH, cx, cy, park_r):
+    """Static rooftops and streets, plus lists of lights that animate."""
+    r = random.Random(1939)
+    S2 = 2
+    img = Image.new("RGB", (CW * S2, CH * S2), (6, 7, 9))
+    shadow = Image.new("L", (CW * S2, CH * S2), 0)
+    d = ImageDraw.Draw(img)
+    ds = ImageDraw.Draw(shadow)
+    windows, lamps, streets = [], [], []
+
+    def S(v):
+        return int(v * S2)
+
+    # street grid
+    xs, x = [], r.uniform(-40, 0)
+    while x < CW:
+        xs.append(x)
+        x += r.uniform(130, 175)
+    ys, y = [], r.uniform(-40, 0)
+    while y < CH:
+        ys.append(y)
+        y += r.uniform(115, 150)
+    SW = 18
+    blocks = []
+    for i in range(len(xs)):
+        for j in range(len(ys)):
+            x0 = xs[i] + SW / 2
+            x1 = (xs[i + 1] if i + 1 < len(xs) else CW + 60) - SW / 2
+            y0 = ys[j] + SW / 2
+            y1 = (ys[j + 1] if j + 1 < len(ys) else CH + 60) - SW / 2
+            blocks.append((x0, y0, x1, y1))
+    for x in xs:
+        streets.append(("v", x))
+        for yy in range(0, CH, 10):
+            d.rectangle([S(x - 0.6), S(yy), S(x + 0.6), S(yy + 5)], fill=(58, 48, 20))
+        for yy in range(int(r.uniform(0, 80)), CH, 120):
+            lamps.append((x - SW / 2 + 2, yy, r.random()))
+    for y in ys:
+        streets.append(("h", y))
+        for xx in range(0, CW, 10):
+            d.rectangle([S(xx), S(y - 0.6), S(xx + 5), S(y + 0.6)], fill=(58, 48, 20))
+        for xx in range(int(r.uniform(0, 80)), CW, 120):
+            lamps.append((xx, y - SW / 2 + 2, r.random()))
+
+    def split(x0, y0, x1, y1, depth):
+        w, h = x1 - x0, y1 - y0
+        if depth > 2 or (w < 70 and h < 70) or r.random() < 0.18 * depth:
+            return [(x0, y0, x1, y1)]
+        gap = 4
+        if w > h:
+            m = r.uniform(x0 + w * 0.35, x0 + w * 0.65)
+            return split(x0, y0, m - gap / 2, y1, depth + 1) + split(m + gap / 2, y0, x1, y1, depth + 1)
+        m = r.uniform(y0 + h * 0.35, y0 + h * 0.65)
+        return split(x0, y0, x1, m - gap / 2, depth + 1) + split(x0, m + gap / 2, x1, y1, depth + 1)
+
+    roofs = []
+    for b in blocks:
+        for (x0, y0, x1, y1) in split(*b, 0):
+            bx, by = (x0 + x1) / 2, (y0 + y1) / 2
+            if math.hypot(bx - cx, by - cy) < park_r + 30:
+                continue
+            roofs.append((x0, y0, x1, y1))
+    for (x0, y0, x1, y1) in roofs:
+        hgt = r.uniform(5, 13)
+        ds.rectangle([S(x0 + hgt * 0.7), S(y0 + hgt), S(x1 + hgt * 0.7), S(y1 + hgt)], fill=200)
+    img.paste((3, 3, 5), mask=shadow.filter(ImageFilter.GaussianBlur(S2 * 2)))
+    d = ImageDraw.Draw(img)
+    for (x0, y0, x1, y1) in roofs:
+        t = r.uniform(0.75, 1.25)
+        base = (int(13 * t), int(14 * t), int(19 * t))
+        d.rectangle([S(x0), S(y0), S(x1), S(y1)], fill=base)
+        # parapet: lit by the moon on the top-right
+        d.rectangle([S(x0), S(y0), S(x1), S(y0 + 2)], fill=(int(30 * t), int(32 * t), int(42 * t)))
+        d.rectangle([S(x1 - 2), S(y0), S(x1), S(y1)], fill=(int(26 * t), int(28 * t), int(37 * t)))
+        d.rectangle([S(x0), S(y1 - 2), S(x1), S(y1)], fill=(int(6 * t), int(6 * t), int(9 * t)))
+        w, h = x1 - x0, y1 - y0
+        kind = r.random()
+        if kind < 0.45 and w > 30 and h > 30:
+            # skylight grid
+            for wx in range(int(x0 + 6), int(x1 - 8), 9):
+                for wy in range(int(y0 + 6), int(y1 - 8), 9):
+                    if r.random() < 0.55:
+                        windows.append((wx, wy, r.random(), r.uniform(0.6, 1.0)))
+                        d.rectangle([S(wx), S(wy), S(wx + 4), S(wy + 4)], fill=(30, 28, 22))
+        for _ in range(r.randint(0, 3)):
+            aw, ah = r.uniform(6, 14), r.uniform(5, 10)
+            ax, ay = r.uniform(x0 + 4, max(x0 + 5, x1 - aw - 4)), r.uniform(y0 + 4, max(y0 + 5, y1 - ah - 4))
+            d.rectangle([S(ax + 2), S(ay + 2), S(ax + aw + 2), S(ay + ah + 2)], fill=(8, 8, 10))
+            d.rectangle([S(ax), S(ay), S(ax + aw), S(ay + ah)], fill=(30, 32, 39))
+            d.rectangle([S(ax), S(ay), S(ax + aw), S(ay + 1.5)], fill=(46, 48, 58))
+        if r.random() < 0.18 and w > 36 and h > 36:
+            tx, ty, tr = r.uniform(x0 + 12, x1 - 12), r.uniform(y0 + 12, y1 - 12), r.uniform(6, 9)
+            d.ellipse([S(tx - tr + 3), S(ty - tr + 3), S(tx + tr + 3), S(ty + tr + 3)], fill=(6, 6, 8))
+            d.ellipse([S(tx - tr), S(ty - tr), S(tx + tr), S(ty + tr)], fill=(44, 34, 26))
+            d.ellipse([S(tx - tr * 0.6), S(ty - tr * 0.7), S(tx + tr * 0.3), S(ty)], fill=(66, 52, 38))
+    out = np.asarray(img.resize((CW, CH), Image.LANCZOS), np.float32) / 255.0
+    return out, windows, lamps, streets, xs, ys
+
+
+CARS = []
+
+
+def city_lights(CW, CH, phase, windows, lamps, xs, ys):
+    glow = Image.new("L", (CW, CH), 0)
+    core = Image.new("RGB", (CW, CH), (0, 0, 0))
+    dg, dc = ImageDraw.Draw(glow), ImageDraw.Draw(core)
+    for (wx, wy, off, b) in windows:
+        on = 0.5 + 0.5 * math.sin(2 * math.pi * (phase * (1 + int(off * 3)) + off * 7))
+        v = b * (0.35 + 0.65 * (on > 0.25))
+        dc.rectangle([wx, wy, wx + 2, wy + 2], fill=(int(250 * v), int(196 * v), int(80 * v)))
+        dg.rectangle([wx - 2, wy - 2, wx + 5, wy + 5], fill=int(90 * v))
+    for (lx, ly, off) in lamps:
+        f = 0.85 + 0.15 * math.sin(2 * math.pi * (phase * 2 + off))
+        dg.ellipse([lx - 7, ly - 7, lx + 7, ly + 7], fill=int(120 * f))
+        dc.ellipse([lx - 1.5, ly - 1.5, lx + 1.5, ly + 1.5], fill=(255, 228, 150))
+    for (kind, k, off, speed, sgn) in CARS:
+        line = xs[k] if kind == "v" else ys[k]
+        pos = ((phase * speed + off) % 1.0)
+        pos = pos if sgn > 0 else 1 - pos
+        lane = 4 * sgn
+        if kind == "v":
+            x, y = line + lane, pos * (CH + 40) - 20
+            hx, hy, tx, ty = x, y + 6 * sgn, x, y - 6 * sgn
+            dg.polygon([(x - 2, y + 6 * sgn), (x + 2, y + 6 * sgn), (x + 8, y + 40 * sgn), (x - 8, y + 40 * sgn)], fill=60)
+            for dx in (-1.6, 1.6):
+                dc.ellipse([hx + dx - 1, hy - 1, hx + dx + 1, hy + 1], fill=(255, 245, 210))
+                dc.ellipse([tx + dx - 1, ty - 1, tx + dx + 1, ty + 1], fill=(220, 40, 30))
+        else:
+            x, y = pos * (CW + 40) - 20, line + lane
+            hx, hy, tx, ty = x + 6 * sgn, y, x - 6 * sgn, y
+            dg.polygon([(x + 6 * sgn, y - 2), (x + 6 * sgn, y + 2), (x + 40 * sgn, y + 8), (x + 40 * sgn, y - 8)], fill=60)
+            for dy in (-1.6, 1.6):
+                dc.ellipse([hx - 1, hy + dy - 1, hx + 1, hy + dy + 1], fill=(255, 245, 210))
+                dc.ellipse([tx - 1, ty + dy - 1, tx + 1, ty + dy + 1], fill=(220, 40, 30))
+    g = np.asarray(glow.filter(ImageFilter.GaussianBlur(5)), np.float32)[..., None] / 255.0
+    c = np.asarray(core.filter(ImageFilter.GaussianBlur(0.5)), np.float32) / 255.0
+    return g * np.array([1.0, 0.78, 0.36], np.float32) * 0.7 + c
+
+
+def searchlights(CW, CH, phase):
+    lay = Image.new("L", (CW, CH), 0)
+    d = ImageDraw.Draw(lay)
+    for (ox, oy, base, swing, off) in [(70, 70, 0.6, 0.6, 0.0), (CW - 70, CH - 60, 3.6, 0.55, 0.5)]:
+        a = base + swing * math.sin(2 * math.pi * (phase + off))
+        L = 420
+        p1 = (ox + L * math.cos(a - 0.09), oy + L * math.sin(a - 0.09))
+        p2 = (ox + L * math.cos(a + 0.09), oy + L * math.sin(a + 0.09))
+        d.polygon([(ox, oy), p1, p2], fill=46)
+        d.ellipse([ox - 5, oy - 5, ox + 5, oy + 5], fill=200)
+    return np.asarray(lay.filter(ImageFilter.GaussianBlur(10)), np.float32)[..., None] / 255.0
+
+
 # ---------- main ----------
 
 def main(src, dst):
@@ -409,19 +564,27 @@ def main(src, dst):
     moon_col = np.array([0.80, 0.88, 1.0], np.float32)
 
     # wide canvas: the pond sits in a night garden that fades into the page
-    CW, CH = 920, 560
+    CW, CH = 960, 640
     OX, OY = (CW - W) // 2, (CH - W) // 2
     page = np.array([13, 17, 23], np.float32) / 255.0
-    outer = garden(CW)[:CH, :, :3] * 0.8
+    park_r = 300
+    pcx, pcy = OX + W / 2, OY + W / 2
+    cityimg, windows, lamps, streets, sxs, sys_ = city(CW, CH, pcx, pcy, park_r)
+    cr = random.Random(77)
+    CARS[:] = [("v" if cr.random() < 0.5 else "h", 0, cr.random(), cr.choice([1, 1, 2]), cr.choice([-1, 1])) for _ in range(8)]
+    CARS[:] = [(kd, cr.randrange(len(sxs) if kd == "v" else len(sys_)), o, sp, sg) for (kd, _, o, sp, sg) in CARS]
+    park = garden(max(CW, CH))[:CH, :CW, :3] * 0.8
     yy, xx = np.mgrid[0:CH, 0:CW].astype(np.float32)
     pd = np.hypot(xx - (OX + W / 2), yy - (OY + W / 2))
     feather = np.clip((256 - pd) / 34, 0, 1)[..., None]
     ex = (xx - CW / 2) / (CW / 2)
     ey = (yy - CH / 2) / (CH / 2)
     e = (ex ** 4 + ey ** 4) ** 0.25
-    t = np.clip((e - 0.62) / (0.99 - 0.62), 0, 1)
+    t = np.clip((e - 0.80) / (0.995 - 0.80), 0, 1)
     edge_fade = (t * t * (3 - 2 * t))[..., None]
-    shade = np.clip(1 - 0.5 * np.clip((pd - 230) / 260, 0, 1), 0, 1)[..., None]
+    parkmask = np.clip((park_r - pd) / 30, 0, 1)[..., None]
+    outer = park * parkmask + cityimg * (1 - parkmask)
+    shade = np.ones_like(parkmask)
 
     # koi centroids for the sparkle trail
     cents = []
@@ -490,13 +653,15 @@ def main(src, dst):
         f = feather[OY:OY + W, OX:OX + W]
         out[OY:OY + W, OX:OX + W] = sq * f + region * (1 - f)
         out = out * shade
+        lights = city_lights(CW, CH, phase, windows, lamps, sxs, sys_) * (1 - parkmask)
+        out = out + lights + searchlights(CW, CH, phase) * np.array([0.95, 0.82, 0.5], np.float32) * (1 - parkmask * 0.7)
         out = out + fireflies_canvas(CW, CH, phase)[..., None] * gold
         out = (1 - np.exp(-out * 1.6)) / (1 - math.exp(-1.6))
         out = out * (1 - edge_fade) + page * edge_fade
         frames.append(Image.fromarray(np.clip(out * 255, 0, 255).astype(np.uint8)))
 
     frames[0].save(dst, save_all=True, append_images=frames[1:], duration=duration,
-                   loop=0, quality=82, method=4)
+                   loop=0, quality=78, method=4)
 
 
 if __name__ == "__main__":

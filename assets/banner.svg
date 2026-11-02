@@ -67,7 +67,7 @@
 <circle cx="926" cy="321" r="1.8" class="fly" style="animation-delay:3.6s;animation-duration:4.8s"/><circle cx="660" cy="299" r="1.8" class="fly" style="animation-delay:4.9s;animation-duration:4.1s"/><circle cx="601" cy="255" r="1.8" class="fly" style="animation-delay:3.1s;animation-duration:5.2s"/><circle cx="197" cy="291" r="1.8" class="fly" style="animation-delay:4.9s;animation-duration:5.9s"/><circle cx="247" cy="251" r="1.8" class="fly" style="animation-delay:0.5s;animation-duration:4.6s"/><circle cx="841" cy="259" r="1.8" class="fly" style="animation-delay:3.5s;animation-duration:6.4s"/><circle cx="384" cy="321" r="1.8" class="fly" style="animation-delay:2.3s;animation-duration:4.8s"/><circle cx="1025" cy="310" r="1.8" class="fly" style="animation-delay:5.5s;animation-duration:5.7s"/><circle cx="704" cy="288" r="1.8" class="fly" style="animation-delay:1.4s;animation-duration:4.7s"/><circle cx="781" cy="263" r="1.8" class="fly" style="animation-delay:3.9s;animation-duration:7.3s"/><circle cx="274" cy="324" r="1.8" class="fly" style="animation-delay:3.7s;animation-duration:7.5s"/><circle cx="807" cy="295" r="1.8" class="fly" style="animation-delay:4.4s;animation-duration:6.9s"/>
 <line x1="120" y1="238" x2="1080" y2="238" stroke="#e3b341" stroke-opacity=".25"/>
 <ellipse cx="600" cy="138" rx="430" ry="70" fill="#020306" opacity=".55" filter="url(#soft)"/>
-<rect x="0" y="245" width="1200" height="95" fill="url(#fadeB)"/>
+<rect x="0" y="295" width="1200" height="45" fill="url(#fadeB)"/>
 <rect x="0" y="0" width="90" height="340" fill="url(#fadeL)"/>
 <rect x="1110" y="0" width="90" height="340" fill="url(#fadeR)"/>
 <rect x="0" y="0" width="1200" height="30" fill="url(#fadeT)"/>

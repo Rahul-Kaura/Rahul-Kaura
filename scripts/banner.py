@@ -149,7 +149,7 @@ def main(f900, f700, out):
 {flies}
 <line x1="120" y1="{HORIZON}" x2="{W - 120}" y2="{HORIZON}" stroke="#e3b341" stroke-opacity=".25"/>
 <ellipse cx="600" cy="138" rx="430" ry="70" fill="#020306" opacity=".55" filter="url(#soft)"/>
-<rect x="0" y="{H - 95}" width="{W}" height="95" fill="url(#fadeB)"/>
+<rect x="0" y="{H - 45}" width="{W}" height="45" fill="url(#fadeB)"/>
 <rect x="0" y="0" width="90" height="{H}" fill="url(#fadeL)"/>
 <rect x="{W - 90}" y="0" width="90" height="{H}" fill="url(#fadeR)"/>
 <rect x="0" y="0" width="{W}" height="30" fill="url(#fadeT)"/>
