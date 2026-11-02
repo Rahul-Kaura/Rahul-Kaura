@@ -28,7 +28,7 @@ ST_W = 26          # side street width
 LANE = 6.5         # lane offset from a two-way street's centreline
 
 # speed limits in px per frame: slow, calm traffic
-V_GROUND, V_RING, V_RAMP, V_HWY = 0.95, 0.85, 0.8, 1.4
+V_GROUND, V_RING, V_RAMP, V_HWY = 0.67, 0.6, 0.55, 0.84
 
 
 def bezier(p0, p1, p2, p3, k=28):
@@ -204,11 +204,7 @@ class Traffic:
         for x, down in ((HL - 9, True), (HL + 9, False), (HR - 9, True), (HR + 9, False)):
             f = Path()
             f.add([(x, -60), (x, CH + 60)] if down else [(x, CH + 60), (x, -60)], "hwy", H)
-            self.flows.append((f.finish(), 58 + self.rng.uniform(0, 16), 1))
-        ring = Path()
-        rp = self.ring_lane(in_lane)
-        ring.add(rp + [rp[0]], "ground", R)
-        self.flows.append((ring.finish(), 92, 1))
+            self.flows.append((f.finish(), 60 + self.rng.uniform(0, 12), 1))
 
     # ---------- signals ----------
 
@@ -220,9 +216,9 @@ class Traffic:
 
     def _simulate(self):
         n = self.n
-        kinds = ["sedan", "sedan", "sedan", "taxi", "taxi", "suv", "suv", "sports", "truck", "police"]
+        kinds = ["sedan", "sedan", "supercar", "taxi", "taxi", "suv", "suv", "sports", "truck", "sedan"]
         spawn_every = n
-        warm = 12 * n
+        warm = 40 * n
         self.route_frames = []
         for ri, path in enumerate(self.routes):
             cars, frames = [], []
@@ -230,7 +226,7 @@ class Traffic:
                 if f % spawn_every == 0:
                     k = kinds[(ri * 3 + (f // spawn_every)) % len(kinds)]
                     if not cars or cars[-1]["s"] > 30:
-                        cars.append(dict(s=0.0, v=0.6, kind=k, brake=False, id=(ri, f % n, (f // n) % 3)))
+                        cars.append(dict(s=0.0, v=0.4, kind=k, brake=False, id=(ri, f % n, (f // n) % 3)))
                 red = self.light_red(path.light, f)
                 for i, c in enumerate(cars):
                     vmax = path.at(c["s"])[4]
@@ -239,8 +235,8 @@ class Traffic:
                         gap = cars[i - 1]["s"] - c["s"] - 24
                     if red and c["s"] < path.stop - 1:
                         gap = min(gap, path.stop - c["s"] - 4)
-                    safe = max(0.0, gap * 0.08)
-                    nv = min(c["v"] + 0.025, vmax, safe)
+                    safe = max(0.0, gap * 0.05)
+                    nv = min(c["v"] + 0.012, vmax, safe)
                     c["brake"] = nv < c["v"] - 0.005 or (nv < 0.1 and gap < 40)
                     c["v"] = max(0.0, nv)
                 for c in cars:
@@ -261,7 +257,7 @@ class Traffic:
             for (s, kind, brake, key) in self.route_frames[ri][frame % self.n]:
                 x, y, h, k, _ = path.at(s)
                 out.append((x, y, h, self.elevated(x, k), kind, brake, ("r",) + key))
-        flow_kinds = ["sedan", "suv", "sedan", "taxi", "truck", "sedan", "sports", "suv", "police", "sedan"]
+        flow_kinds = ["sedan", "suv", "supercar", "taxi", "truck", "sedan", "sports", "suv", "sedan", "taxi", "sedan", "suv"]
         for fi, (path, gap, m) in enumerate(self.flows):
             count = max(1, int(path.length // gap))
             spacing = path.length / count
@@ -403,10 +399,10 @@ class Traffic:
             pxv, pyv = -uy, ux
             hl = spr.info_len / 2
             hx, hy = x + ux * hl, y + uy * hl
-            bl, bw = 46, 11
+            bl, bw = 54, 13
             dg.polygon([(hx + pxv * 2.5, hy + pyv * 2.5), (hx - pxv * 2.5, hy - pyv * 2.5),
                         (hx + ux * bl - pxv * bw, hy + uy * bl - pyv * bw), (hx + ux * bl + pxv * bw, hy + uy * bl + pyv * bw)],
-                       fill=(54, 47, 32))
+                       fill=(78, 68, 44))
             for side in (-spr.info_w / 2 + 1.2, spr.info_w / 2 - 1.2):
                 dc.ellipse([hx + pxv * side - 1.3, hy + pyv * side - 1.3, hx + pxv * side + 1.3, hy + pyv * side + 1.3], fill=(255, 250, 228))
                 tx, ty = x - ux * hl + pxv * side, y - uy * hl + pyv * side
@@ -414,14 +410,8 @@ class Traffic:
                 dc.ellipse([tx - rr, ty - rr, tx + rr, ty + rr], fill=(255, 40, 28))
                 gg = 7 if brake else 5
                 dg.ellipse([tx - gg, ty - gg, tx + gg, ty + gg], fill=(170, 18, 10) if brake else (110, 12, 6))
-            if kind == "police":
-                on = (frame // 2) % 2 == 0
-                for side, col in ((-2.2, (255, 30, 30)), (2.2, (40, 90, 255))):
-                    if (side < 0) != on:
-                        continue
-                    bx, by = x + pxv * side, y + pyv * side
-                    dc.ellipse([bx - 1.6, by - 1.6, bx + 1.6, by + 1.6], fill=col)
-                    dg.ellipse([bx - 15, by - 15, bx + 15, by + 15], fill=tuple(int(c * 0.75) for c in col))
+            if kind == "supercar":
+                dg.ellipse([x - 12, y - 12, x + 12, y + 12], fill=(120, 14, 14))
 
         def pack(L):
             sh = np.asarray(L["shadow"].filter(ImageFilter.GaussianBlur(1.4)), np.float32)[..., None] / 255.0
@@ -453,7 +443,7 @@ SEDAN_COLORS = [(22, 22, 26), (92, 18, 22), (150, 152, 160), (24, 34, 62), (58, 
 
 def car_sprite(kind, r):
     """Top-down car facing +x, drawn at SCALE x size."""
-    dims = {"sedan": (18, 8), "taxi": (18, 8), "suv": (20, 9), "sports": (17, 7.4), "truck": (28, 10), "police": (19, 8.2)}
+    dims = {"sedan": (18, 8), "taxi": (18, 8), "suv": (20, 9), "sports": (17, 7.4), "truck": (28, 10), "police": (19, 8.2), "supercar": (19, 8.6)}
     L, Wd = dims[kind]
     S = SCALE
     pad = 4
@@ -473,6 +463,18 @@ def car_sprite(kind, r):
         paint = r.choice(SEDAN_COLORS)
     hi = tuple(min(255, int(c * 1.35 + 18)) for c in paint)
     glass = (34, 44, 60)
+    if kind == "supercar":
+        red, deep, shine = (214, 18, 24), (130, 8, 12), (255, 120, 112)
+        R(0, 0.2, L, Wd - 0.2, deep, 3.2)                       # body shadow edge
+        R(0.3, 0.6, L - 0.3, Wd - 0.6, red, 3)                   # wedge body
+        R(L * 0.40, 1.4, L * 0.70, Wd - 1.4, (14, 14, 18), 1.6)  # black canopy
+        R(L * 0.46, 2.0, L * 0.64, Wd - 2.0, (40, 44, 54), 1)    # glass sheen
+        R(L * 0.72, 1.3, L - 1.2, 2.2, shine, 1)                 # hood highlight
+        R(L * 0.30, 0.3, L * 0.42, 1.2, (20, 6, 8), 0.4)         # side intakes
+        R(L * 0.30, Wd - 1.2, L * 0.42, Wd - 0.3, (20, 6, 8), 0.4)
+        R(0.2, 0.8, 1.6, Wd - 0.8, (18, 18, 20), 0.5)            # rear spoiler
+        img.info_len, img.info_w = L, Wd
+        return img
     if kind == "truck":
         R(0, 0, L * 0.72, Wd, paint, 1)
         R(0.6, 0.6, L * 0.72 - 0.6, 1.6, hi, 1)

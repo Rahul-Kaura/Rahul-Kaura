@@ -550,6 +550,87 @@ def pond_lights(W):
         return out[..., None]
 
 
+def plane_sprite():
+    """Top-down airliner facing +x, drawn at 3x, dark with a soft highlight."""
+    S = 3
+    L, span = 92, 86
+    img = Image.new("RGBA", (int((L + 10) * S), int((span + 10) * S)), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    ox, oy = 5 * S, (span / 2 + 5) * S
+
+    k = L / 58.0
+
+    def P(x, y):
+        return (ox + x * k * S, oy + y * k * S)
+
+    body, hi, wing = (112, 116, 128, 255), (168, 172, 184, 255), (88, 92, 104, 255)
+    # wings (swept back)
+    d.polygon([P(30, -2), P(17, -27), P(12, -27), P(20, -2)], fill=wing)
+    d.polygon([P(30, 2), P(17, 27), P(12, 27), P(20, 2)], fill=wing)
+    # tailplane
+    d.polygon([P(8, -1.5), P(2, -11), P(-1, -11), P(3, -1.5)], fill=wing)
+    d.polygon([P(8, 1.5), P(2, 11), P(-1, 11), P(3, 1.5)], fill=wing)
+    # engines
+    for side in (-11, 11):
+        d.rounded_rectangle([*P(21, side - 1.8), *P(29, side + 1.8)], radius=1.5 * S, fill=(60, 63, 72, 255))
+    # fuselage
+    d.rounded_rectangle([*P(0, -3.2), *P(58, 3.2)], radius=3.2 * k * S, fill=body)
+    d.rounded_rectangle([*P(4, -1.4), *P(54, -0.2)], radius=0.6 * k * S, fill=hi)
+    d.ellipse([*P(51, -2.2), *P(57, 2.2)], fill=(28, 34, 46, 255))
+    return img, L, span
+
+
+PLANE = None
+
+
+def planes_layer(CW, CH, phase):
+    """Two planes gliding over the city corners with steady navigation lights."""
+    global PLANE
+    if PLANE is None:
+        PLANE = plane_sprite()
+    spr, L, span = PLANE
+    body = Image.new("RGBA", (CW, CH), (0, 0, 0, 0))
+    shadow = Image.new("L", (CW, CH), 0)
+    glow = Image.new("RGB", (CW, CH), (0, 0, 0))
+    core = Image.new("RGB", (CW, CH), (0, 0, 0))
+    dg, dc = ImageDraw.Draw(glow), ImageDraw.Draw(core)
+    flights = [((-90, 360), (580, -90), 0.0), ((CW + 90, CH - 360), (CW - 580, CH + 90), 0.5)]
+    for (x0, y0), (x1, y1), off in flights:
+        t = (phase + off) % 1.0
+        x, y = x0 + (x1 - x0) * t, y0 + (y1 - y0) * t
+        h = math.atan2(y1 - y0, x1 - x0)
+        rot = spr.rotate(-math.degrees(h), resample=Image.BICUBIC, expand=True)
+        small = rot.resize((rot.width // 3, rot.height // 3), Image.LANCZOS)
+        px, py = int(x - small.width / 2), int(y - small.height / 2)
+        a = small.getchannel("A")
+        for (dx, dy, img) in ((46, 58, None),):
+            sx, sy = px + dx, py + dy
+            if -small.width < sx < CW and -small.height < sy < CH:
+                shadow.paste(255, (sx, sy, sx + small.width, sy + small.height), a)
+        if -small.width < px < CW and -small.height < py < CH:
+            body.alpha_composite(small, (max(0, px), max(0, py))) if px >= 0 and py >= 0 else None
+            if px < 0 or py < 0:
+                cx0, cy0 = max(0, -px), max(0, -py)
+                if cx0 < small.width and cy0 < small.height:
+                    body.alpha_composite(small.crop((cx0, cy0, small.width, small.height)), (max(0, px), max(0, py)))
+        ux, uy = math.cos(h), math.sin(h)
+        vx, vy = -uy, ux
+        # steady navigation lights: red on the left wingtip, green on the right, white at the tail
+        for (lx, ly, col) in ((x + ux * (17 * L / 58 - L / 2) - vx * span / 2, y + uy * (17 * L / 58 - L / 2) - vy * span / 2, (255, 70, 60)),
+                              (x + ux * (17 * L / 58 - L / 2) + vx * span / 2, y + uy * (17 * L / 58 - L / 2) + vy * span / 2, (70, 255, 140)),
+                              (x - ux * L / 2, y - uy * L / 2, (255, 250, 235))):
+            dg.ellipse([lx - 7, ly - 7, lx + 7, ly + 7], fill=tuple(int(c * 0.45) for c in col))
+            dc.ellipse([lx - 1.3, ly - 1.3, lx + 1.3, ly + 1.3], fill=col)
+        # soft landing lights glow ahead of the nose
+        nx, ny = x + ux * L / 2, y + uy * L / 2
+        dg.ellipse([nx - 10, ny - 10, nx + 10, ny + 10], fill=(60, 56, 44))
+    sh = np.asarray(shadow.filter(ImageFilter.GaussianBlur(6)), np.float32)[..., None] / 255.0
+    b = np.asarray(body, np.float32) / 255.0
+    lights = (np.asarray(glow.filter(ImageFilter.GaussianBlur(5)), np.float32) / 255.0 +
+              np.asarray(core.filter(ImageFilter.GaussianBlur(0.5)), np.float32) / 255.0)
+    return sh, b, lights
+
+
 # ---------- main ----------
 
 def main(src, dst):
@@ -683,6 +764,11 @@ def main(src, dst):
         ta_ = tbody[..., 3:4]
         out = out * (1 - ta_) + tbody[..., :3] * ta_
         out = out + tlights + beam * spot_col * 0.9
+        plane_sh, plane_body, plane_lights = planes_layer(CW, CH, phase)
+        out = out * (1 - 0.35 * plane_sh)
+        plane_a = plane_body[..., 3:4]
+        out = out * (1 - plane_a) + plane_body[..., :3] * plane_a
+        out = out + plane_lights
         out = out + fireflies_canvas(CW, CH, phase)[..., None] * gold
         out = (1 - np.exp(-out * 1.6)) / (1 - math.exp(-1.6))
         out = out * (1 - edge_fade) + page * edge_fade
