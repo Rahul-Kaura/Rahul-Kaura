@@ -1,19 +1,23 @@
 <p align="center">
-  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=28&duration=3000&pause=800&color=70A5FD&center=true&vCenter=true&width=900&height=60&lines=Hi%2C+I'm+Rahul+%F0%9F%91%8B;Forward+Deployed+Engineer+%40+Uniphore;Infrastructure+%E2%80%A2+Observability+%E2%80%A2+AI+Agents;RAG+%E2%80%A2+Document+Parsing+%E2%80%A2+Evals" alt="Typing intro" />
+  <img src="assets/banner.svg" width="100%" alt="Rahul Kaura, Forward Deployed Engineer at Uniphore" />
 </p>
 
 <p align="center">
-  <img src="koi/koi.gif" width="512" alt="My black koi, redrawn every night from my GitHub activity" />
+  <img src="https://readme-typing-svg.demolab.com?font=Orbitron&weight=700&size=22&duration=3000&pause=900&color=E8925B&center=true&vCenter=true&width=900&height=50&letterSpacing=2px&lines=INFRASTRUCTURE+%E2%80%A2+OBSERVABILITY+%E2%80%A2+AI+AGENTS;RAG+%E2%80%A2+DOCUMENT+PARSING+%E2%80%A2+EVALS;SHIPPING+AI+INTO+REAL+ENVIRONMENTS" alt="Focus areas" />
+</p>
+
+<p align="center">
+  <img src="koi/koi.gif" width="512" alt="My koi, redrawn every night from my GitHub activity" />
 </p>
 
 <p align="center"><sub>My koi is redrawn every night from my GitHub activity: languages color it, contributions grow it, streaks mark it.</sub></p>
 
-## About me
+## About
 
-- 🛰️ **Forward Deployed Engineer @ Uniphore**: I ship agent and document-parsing systems for enterprise clients, and I'm on the research team working on evals.
-- 🔭 **Before that, Manifest (now Empirik AI)**: I built a change-observability platform tracking Kubernetes, IAM, database and network changes, led the observability dashboard, and built the RAG layer over client data.
-- ⚡ **Santa Clara University, Computer Science & Engineering**: research on AI agents in microgrids.
-- 🎯 **Goal**: Forward Deployed Engineering in defense.
+- **Forward Deployed Engineer @ Uniphore**: I ship agent and document-parsing systems for enterprise clients, and I'm on the research team working on evals.
+- **Before that, Manifest (now Empirik AI)**: I built a change-observability platform tracking Kubernetes, IAM, database and network changes, led the observability dashboard, and built the RAG layer over client data.
+- **Santa Clara University, Computer Science & Engineering**: research on AI agents in microgrids.
+- **Goal**: Forward Deployed Engineering in defense.
 
 ## Tech
 
