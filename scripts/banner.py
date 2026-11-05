@@ -61,9 +61,47 @@ def skyline(layer_scale, color, count_range, seed_off, windows):
     return f'<g fill="{color}">{body}</g>', "".join(wins)
 
 
+def clock_tower(x, base):
+    """Gothic clock tower silhouette with a lit face; the hands sweep continuously (decorative)."""
+    c = "#05060b"
+    edge = "#3a3220"
+    cy = base - 116      # clock centre
+    parts = []
+    # shaft with buttress lines
+    parts.append(f'<rect x="{x-17}" y="{cy+28}" width="34" height="{base-cy-28}" fill="{c}"/>')
+    for dx in (-11, 0, 11):
+        parts.append(f'<line x1="{x+dx}" y1="{cy+34}" x2="{x+dx}" y2="{base}" stroke="#10121a" stroke-width="1.4"/>')
+    # lit windows in the shaft
+    for k, wy in enumerate(range(int(cy + 44), int(base - 10), 16)):
+        parts.append(f'<rect x="{x-2}" y="{wy}" width="4" height="7" class="win" style="animation-delay:{k*0.9:.1f}s;animation-duration:9s"/>')
+    # clock stage
+    parts.append(f'<rect x="{x-23}" y="{cy-27}" width="46" height="55" fill="{c}" stroke="{edge}" stroke-width=".8"/>')
+    parts.append(f'<circle cx="{x}" cy="{cy}" r="27" fill="url(#clockGlow)"/>')
+    parts.append(f'<circle cx="{x}" cy="{cy}" r="17" fill="#f3d998" stroke="#8a6a20" stroke-width="1.6"/>')
+    for k in range(12):
+        import math as _m
+        a = _m.radians(k * 30)
+        r0, r1 = (12.5, 15.5) if k % 3 else (11, 15.5)
+        parts.append(f'<line x1="{x + r0*_m.sin(a):.2f}" y1="{cy - r0*_m.cos(a):.2f}" x2="{x + r1*_m.sin(a):.2f}" y2="{cy - r1*_m.cos(a):.2f}" stroke="#3a2a08" stroke-width="{1.6 if k % 3 == 0 else 0.9}"/>')
+    parts.append(f'<g style="transform-origin:{x}px {cy}px;animation:spin 150s linear infinite"><line x1="{x}" y1="{cy+2}" x2="{x}" y2="{cy-8.5}" stroke="#1a1206" stroke-width="2.2" stroke-linecap="round"/></g>')
+    parts.append(f'<g style="transform-origin:{x}px {cy}px;animation:spin 12.5s linear infinite"><line x1="{x}" y1="{cy+3}" x2="{x}" y2="{cy-13.5}" stroke="#1a1206" stroke-width="1.4" stroke-linecap="round"/></g>')
+    parts.append(f'<circle cx="{x}" cy="{cy}" r="1.6" fill="#1a1206"/>')
+    # belfry with arches
+    parts.append(f'<rect x="{x-19}" y="{cy-52}" width="38" height="25" fill="{c}" stroke="{edge}" stroke-width=".6"/>')
+    for dx in (-10, 0, 10):
+        parts.append(f'<path d="M{x+dx-3},{cy-30} v-12 a3,3 0 0 1 6,0 v12 z" fill="#2b2412"/>')
+    # spire and pinnacles
+    parts.append(f'<polygon points="{x-21},{cy-52} {x},{cy-96} {x+21},{cy-52}" fill="{c}" stroke="{edge}" stroke-width=".6"/>')
+    parts.append(f'<line x1="{x}" y1="{cy-96}" x2="{x}" y2="{cy-106}" stroke="#c9a54a" stroke-width="1.2"/>')
+    for dx in (-21, 21):
+        parts.append(f'<polygon points="{x+dx-3},{cy-27} {x+dx},{cy-44} {x+dx+3},{cy-27}" fill="{c}"/>')
+    return "".join(parts)
+
+
 def main(f900, f700, out):
     b900 = base64.b64encode(open(f900, "rb").read()).decode()
     b700 = base64.b64encode(open(f700, "rb").read()).decode()
+    tower = clock_tower(150, HORIZON)
     far, _ = skyline(0.85, "#121726", (26, 52), 1, False)
     near, wins = skyline(1.15, "#06070c", (34, 70), 2, True)
 
@@ -98,6 +136,7 @@ def main(f900, f700, out):
 @keyframes sweepA{{0%,100%{{transform:rotate(-28deg)}}50%{{transform:rotate(14deg)}}}}
 @keyframes sweepB{{0%,100%{{transform:rotate(22deg)}}50%{{transform:rotate(-16deg)}}}}
 @keyframes drift{{from{{transform:translateX(-260px)}}to{{transform:translateX(1260px)}}}}
+@keyframes spin{{to{{transform:rotate(360deg)}}}}
 @keyframes rise{{from{{opacity:0;transform:translateY(10px)}}to{{opacity:1;transform:none}}}}
 @keyframes pulse{{0%,100%{{opacity:.55}}50%{{opacity:.9}}}}
 .t{{font-family:Orb,sans-serif;font-weight:900;font-size:66px;letter-spacing:12px;fill:url(#gold);animation:rise 1.4s ease-out both}}
@@ -113,6 +152,7 @@ def main(f900, f700, out):
 <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
   <stop offset="0" stop-color="#fff1b8"/><stop offset=".45" stop-color="#e3b341"/><stop offset="1" stop-color="#9a6b12"/>
 </linearGradient>
+<radialGradient id="clockGlow"><stop offset="0" stop-color="#ffd27a" stop-opacity=".55"/><stop offset="1" stop-color="#ffd27a" stop-opacity="0"/></radialGradient>
 <radialGradient id="moonGlow"><stop offset="0" stop-color="#e8eeff" stop-opacity=".55"/><stop offset="1" stop-color="#e8eeff" stop-opacity="0"/></radialGradient>
 <radialGradient id="moonBody" cx=".42" cy=".4"><stop offset="0" stop-color="#fbfcff"/><stop offset="1" stop-color="#b9c3dc"/></radialGradient>
 <linearGradient id="beam" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#f6d77a" stop-opacity=".38"/><stop offset="1" stop-color="#f6d77a" stop-opacity="0"/></linearGradient>
@@ -143,6 +183,7 @@ def main(f900, f700, out):
 <g id="city">
 {far}
 {near}
+{tower}
 <g>{wins}</g>
 </g>
 <rect x="0" y="{HORIZON}" width="{W}" height="{H - HORIZON}" fill="url(#water)"/>

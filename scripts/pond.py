@@ -740,6 +740,10 @@ def airport_lights(CW, CH, AX):
                 lamp(hg["x"] + xo, dy, (255, 228, 170), g=9, r=1.4, k=0.3)
         for yy in range(30, CH, 60):
             lamp(side["cx"] + 6, yy, (80, 130, 255), g=4, r=1.0, k=0.5)
+    x0, x1, by = bridge_geom(CW, CH)
+    for xx in np.linspace(x0 + 40, x1 - 40, 7):
+        for side in (-1, 1):
+            lamp(xx, by + side * (BRIDGE_W / 2 - 1.5), (255, 214, 140), g=14, r=1.4, k=0.3)
     g = np.asarray(glow.filter(ImageFilter.GaussianBlur(4)), np.float32) / 255.0
     c = np.asarray(core.filter(ImageFilter.GaussianBlur(0.5)), np.float32) / 255.0
     return g + c
@@ -840,8 +844,51 @@ def _ang(a):
 
 
 ROOFS = None
+BRIDGE = None
 SORTIES = None
 KOI_POS = None   # koi position on the canvas for each frame, set by main()
+
+
+BRIDGE_Y_OFF = -78     # bridge centreline relative to the pond centre
+BRIDGE_HALF = 345      # half length, ends rest on the rocks
+BRIDGE_W = 30
+
+
+def bridge_geom(CW, CH):
+    return CW / 2 - BRIDGE_HALF, CW / 2 + BRIDGE_HALF, CH / 2 + BRIDGE_Y_OFF
+
+
+def bridge_layer(CW, CH):
+    """Stone footbridge across the pond, as an RGBA overlay plus its shadow on the water."""
+    S = 2
+    x0, x1, y = bridge_geom(CW, CH)
+    hw = BRIDGE_W / 2
+    lay = Image.new("RGBA", (CW * S, CH * S), (0, 0, 0, 0))
+    sh = Image.new("L", (CW * S, CH * S), 0)
+    d, ds = ImageDraw.Draw(lay), ImageDraw.Draw(sh)
+    ds.rectangle([(x0 + 20) * S, (y - hw + 14) * S, (x1 - 20) * S, (y + hw + 18) * S], fill=170)
+    # gentle arch: deck widens slightly at the ends
+    d.polygon([((x0) * S, (y - hw - 4) * S), ((x0 + 60) * S, (y - hw) * S), ((x1 - 60) * S, (y - hw) * S), ((x1) * S, (y - hw - 4) * S),
+               ((x1) * S, (y + hw + 4) * S), ((x1 - 60) * S, (y + hw) * S), ((x0 + 60) * S, (y + hw) * S), ((x0) * S, (y + hw + 4) * S)],
+              fill=(58, 58, 62, 255))
+    # paving stones
+    for xx in range(int(x0 + 4), int(x1 - 4), 9):
+        d.line([(xx * S, (y - hw + 3) * S), (xx * S, (y + hw - 3) * S)], fill=(46, 46, 50, 255), width=S)
+    d.line([((x0 + 6) * S, y * S), ((x1 - 6) * S, y * S)], fill=(50, 50, 54, 255), width=S)
+    # parapets with gold trim on the moonlit edge
+    for side in (-1, 1):
+        yy = y + side * (hw - 1.5)
+        d.line([((x0 + 2) * S, yy * S), ((x1 - 2) * S, yy * S)], fill=(92, 92, 98, 255), width=3 * S)
+        d.line([((x0 + 2) * S, (yy - side * 2) * S), ((x1 - 2) * S, (yy - side * 2) * S)],
+               fill=(150, 118, 40, 255) if side < 0 else (40, 40, 44, 255), width=S)
+    # lamp posts
+    for xx in np.linspace(x0 + 40, x1 - 40, 7):
+        for side in (-1, 1):
+            d.ellipse([(xx - 2.6) * S, (y + side * (hw - 1.5) - 2.6) * S, (xx + 2.6) * S, (y + side * (hw - 1.5) + 2.6) * S],
+                      fill=(26, 26, 30, 255))
+    lay = lay.resize((CW, CH), Image.LANCZOS)
+    sh = sh.filter(ImageFilter.GaussianBlur(10 * S)).resize((CW, CH), Image.LANCZOS)
+    return lay, sh
 
 
 def _flight_curve(pad0, pad1, reach, swing):
@@ -869,13 +916,19 @@ def _build_sorties(CW, CH, AX, n):
             so = dict(start=r.randrange(0, n), taxi=7, lift=11, fly=86, land=11, taxi_in=5,
                       h0=(hg0["x"], hg0["y"]), d0=(hg0["x"], hg0["y"] + hg0["hh"] * hg0["door"]), p0=pad0,
                       h1=(hg1["x"], hg1["y"]), d1=(hg1["x"], hg1["y"] + hg1["hh"] * hg1["door"]), p1=pad1)
-            so["P"], so["cum"] = _flight_curve(pad0, pad1, r.uniform(520, 700), r.uniform(-120, 120))
-            hv = so["P"][int(np.searchsorted(so["cum"], so["cum"][-1] * 0.5))]
-            so["hover"] = (float(hv[0]), float(hv[1]))
-            so["jump"] = so["taxi"] + so["lift"] + int(so["fly"] * 0.44)
-            pc = (CW / 2, CH / 2)
-            if math.hypot(hv[0] - pc[0], hv[1] - pc[1]) > 210:
-                continue
+            bx0, bx1, by = bridge_geom(CW, CH)
+            sgn = 1 if pad0[0] < CW / 2 else -1
+            hx = CW / 2 + sgn * r.uniform(-170, 30)          # somewhere along the bridge, nearer its own side
+            hv = (hx, by)
+            sw = r.uniform(40, 140)
+            a = bezier(pad0, (pad0[0] + sgn * sw, pad0[1] - 90), (hx - sgn * 160, by - r.uniform(-60, 60)), hv, 50)
+            b = bezier(hv, (hx - sgn * 160, by + r.uniform(40, 140)), (pad1[0] + sgn * sw, pad1[1] + 90), pad1, 50)
+            P = np.array(a + b[1:])
+            so["P"] = P
+            so["cum"] = np.concatenate([[0], np.cumsum(np.hypot(*(P[1:] - P[:-1]).T))])
+            so["hfrac"] = float(so["cum"][50] / so["cum"][-1])
+            so["hover"] = hv
+            so["jump"] = so["taxi"] + so["lift"] + int(so["fly"] * 0.43)
             # clearance from the koi, and from the other helicopter, over every frame
             score = 1e9
             for f in range(n):
@@ -934,11 +987,12 @@ def _sortie_state(so, frame, n):
         u = (tau - t2) / so["fly"]
         out_f, hover_f = 0.40, 0.22          # fly out, hover over the pond, fly back
         if u < out_f:
-            p_ = 0.5 * ease(u / out_f)
+            p_ = so.get("hfrac", 0.5) * ease(u / out_f)
         elif u < out_f + hover_f:
-            p_ = 0.5
+            p_ = so.get("hfrac", 0.5)
         else:
-            p_ = 0.5 + 0.5 * ease((u - out_f - hover_f) / (1 - out_f - hover_f))
+            h_ = so.get("hfrac", 0.5)
+            p_ = h_ + (1 - h_) * ease((u - out_f - hover_f) / (1 - out_f - hover_f))
         s_ = p_ * so["cum"][-1]
         i = int(np.clip(np.searchsorted(so["cum"], s_) - 1, 0, len(so["P"]) - 2))
         f = (s_ - so["cum"][i]) / max(so["cum"][i + 1] - so["cum"][i], 1e-6)
@@ -961,21 +1015,32 @@ def _sortie_state(so, frame, n):
 
 
 def _diver_state(so, frame, n, CW, CH):
-    """Skydiver timeline after the jump: fall and shrink, splash, swim to the edge, fade out."""
+    """Person dropped onto the bridge: lands, walks to the rail, jumps into the pond, swims out, fades."""
     d = (frame - so["start"] - so["jump"]) % n
     hx, hy = so["hover"]
     pcx, pcy = CW / 2, CH / 2
+    side = 1 if (frame * 0 + int(hx)) % 2 else -1      # which rail they head for (fixed per sortie)
+    rail_y = hy + side * (BRIDGE_W / 2 + 2)
     out = []
-    if d < 18:
-        u = d / 17
-        out.append(("fall", hx + 6 * u, hy + 10 * u, 1.0 - 0.62 * u, 1.0 - 0.15 * u))
-    elif d < 64:
-        e = d - 18
+    if d < 8:                                            # fast-rope drop onto the deck
+        u = d / 7
+        out.append(("fall", hx, hy, 1.0 - 0.35 * u, 1.0))
+    elif d < 16:                                         # land and stand
+        out.append(("stand", hx, hy, 0.0, 1.0))
+    elif d < 26:                                         # walk to the railing
+        u = (d - 16) / 10
+        out.append(("stand", hx, hy + (rail_y - hy) * u, u, 1.0))
+    elif d < 34:                                         # jump off, falling away from view
+        u = (d - 26) / 8
+        out.append(("fall", hx, rail_y + side * 16 * u, 0.65 - 0.3 * u, 1.0))
+    elif d < 84:
+        e = d - 34
+        sx0, sy0 = hx, rail_y + side * 16
         if e < 24:
-            out.append(("splash", hx + 6, hy + 10, e / 24, 1.0))
-        a = math.atan2(hy - pcy, hx - pcx)
-        sx, sy = hx + 6 + math.cos(a) * 2.6 * e, hy + 10 + math.sin(a) * 2.6 * e
-        fade = 1.0 if e < 26 else max(0.0, 1 - (e - 26) / 20)
+            out.append(("splash", sx0, sy0, e / 24, 1.0))
+        a = math.atan2(side * 1.0, 0.25 if hx > pcx else -0.25)   # swim away from the bridge, toward the rim
+        sx, sy = sx0 + math.cos(a) * 2.4 * e, sy0 + math.sin(a) * 2.4 * e
+        fade = 1.0 if e < 28 else max(0.0, 1 - (e - 28) / 22)
         out.append(("swim", sx, sy, a, fade, e))
     return out
 
@@ -986,13 +1051,19 @@ def _draw_diver(body, item):
     if kind == "fall":
         _, x, y, sc, al = item
         a = int(255 * al)
-        s = 7 * sc
+        s = 12 * sc
         olive, skin = (70, 78, 52, a), (196, 160, 120, a)
         # arched freefall pose: arms and legs spread
         for (dx, dy) in ((-1.1, -0.9), (1.1, -0.9), (-0.8, 1.3), (0.8, 1.3)):
-            d.line([(x, y), (x + dx * s, y + dy * s)], fill=olive, width=max(1, int(2.2 * sc)))
+            d.line([(x, y), (x + dx * s, y + dy * s)], fill=olive, width=max(2, int(3.6 * sc)))
         d.ellipse([x - 0.55 * s, y - 0.7 * s, x + 0.55 * s, y + 0.7 * s], fill=olive)
         d.ellipse([x - 0.4 * s, y - 1.3 * s, x + 0.4 * s, y - 0.55 * s], fill=(20, 20, 22, a))
+    elif kind == "stand":
+        _, x, y, step, al = item
+        a = int(255 * al)
+        sway = math.sin(step * 12) * 1.2
+        d.ellipse([x - 5.6, y - 4.2 + sway * 0.4, x + 5.6, y + 4.2 + sway * 0.4], fill=(84, 92, 62, a))   # shoulders
+        d.ellipse([x - 3.0, y - 3.0, x + 3.0, y + 3.0], fill=(20, 20, 22, a))                            # helmet
     elif kind == "splash":
         _, x, y, u, _ = item
         for k in range(3):
@@ -1012,15 +1083,15 @@ def _draw_diver(body, item):
         stroke = math.sin(e * 0.7)
         # wake
         for k in (1, 2):
-            bx, by = x - ux * 7 * k, y - uy * 7 * k
+            bx, by = x - ux * 12 * k, y - uy * 12 * k
             d.line([(bx + vx * 3 * k, by + vy * 3 * k), (x - ux * 2, y - uy * 2), (bx - vx * 3 * k, by - vy * 3 * k)],
                    fill=(200, 222, 230, int(80 * fade / k)), width=1)
-        d.ellipse([x - 2.2, y - 2.2, x + 2.2, y + 2.2], fill=(20, 20, 22, al))          # head
-        d.line([(x - ux * 2, y - uy * 2), (x - ux * 7, y - uy * 7)], fill=(70, 78, 52, al), width=2)
+        d.ellipse([x - 3.4, y - 3.4, x + 3.4, y + 3.4], fill=(20, 20, 22, al))          # head
+        d.line([(x - ux * 3, y - uy * 3), (x - ux * 12, y - uy * 12)], fill=(84, 92, 62, al), width=4)
         for side in (-1, 1):
-            reach = 4 + 3 * stroke * side
-            d.line([(x, y), (x + ux * reach + vx * 3.5 * side, y + uy * reach + vy * 3.5 * side)],
-                   fill=(196, 160, 120, al), width=1)
+            reach = 7 + 5 * stroke * side
+            d.line([(x, y), (x + ux * reach + vx * 6 * side, y + uy * reach + vy * 6 * side)],
+                   fill=(196, 160, 120, al), width=2)
 
 
 def airport_planes(CW, CH, AX, phase):
@@ -1036,6 +1107,11 @@ def airport_planes(CW, CH, AX, phase):
         lv[k] = dict(body=Image.new("RGBA", (CW, CH), (0, 0, 0, 0)), shadow=Image.new("L", (CW, CH), 0),
                      glow=Image.new("RGB", (CW, CH), (0, 0, 0)), core=Image.new("RGB", (CW, CH), (0, 0, 0)),
                      beam=Image.new("L", (CW, CH), 0))
+    global BRIDGE
+    if BRIDGE is None:
+        BRIDGE = bridge_layer(CW, CH)
+    lv["g"]["body"].alpha_composite(BRIDGE[0])
+    lv["g"]["shadow"].paste(BRIDGE[1], (0, 0), BRIDGE[1])
     for so in SORTIES:
         for item in _diver_state(so, frame, n, CW, CH):
             _draw_diver(lv["g"]["body"], item)
