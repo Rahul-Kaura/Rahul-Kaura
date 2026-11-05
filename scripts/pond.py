@@ -1015,83 +1015,125 @@ def _sortie_state(so, frame, n):
 
 
 def _diver_state(so, frame, n, CW, CH):
-    """Person dropped onto the bridge: lands, walks to the rail, jumps into the pond, swims out, fades."""
+    """Person dropped onto the bridge: lands, walks to the rail, jumps in, swims to the rim,
+    climbs over the rocks and walks off into the dark."""
     d = (frame - so["start"] - so["jump"]) % n
     hx, hy = so["hover"]
     pcx, pcy = CW / 2, CH / 2
-    side = 1 if (frame * 0 + int(hx)) % 2 else -1      # which rail they head for (fixed per sortie)
+    side = -1                                             # head for the north rail and rim (closest)
     rail_y = hy + side * (BRIDGE_W / 2 + 2)
+    up = -math.pi / 2
+    tilt = 0.35 if hx > pcx else -0.35                   # angle a little toward their own side
+    a = up + tilt
+    ux, uy = math.cos(a), math.sin(a)
     out = []
-    if d < 8:                                            # fast-rope drop onto the deck
+    if d < 8:
         u = d / 7
-        out.append(("fall", hx, hy, 1.0 - 0.35 * u, 1.0))
-    elif d < 16:                                         # land and stand
-        out.append(("stand", hx, hy, 0.0, 1.0))
-    elif d < 26:                                         # walk to the railing
-        u = (d - 16) / 10
-        out.append(("stand", hx, hy + (rail_y - hy) * u, u, 1.0))
-    elif d < 34:                                         # jump off, falling away from view
-        u = (d - 26) / 8
-        out.append(("fall", hx, rail_y + side * 16 * u, 0.65 - 0.3 * u, 1.0))
-    elif d < 84:
-        e = d - 34
+        out.append(("fall", hx, hy, 1.0 - 0.3 * u, 1.0))
+    elif d < 15:
+        out.append(("stand", hx, hy, 0.0, 1.0, a, False))
+    elif d < 24:
+        u = (d - 15) / 9
+        out.append(("stand", hx, hy + (rail_y - hy) * u, u * 4, 1.0, up, True))
+    elif d < 31:
+        u = (d - 24) / 7
+        out.append(("fall", hx, rail_y + side * 16 * u, 0.7 - 0.25 * u, 1.0))
+    else:
+        e = d - 31
         sx0, sy0 = hx, rail_y + side * 16
-        if e < 24:
-            out.append(("splash", sx0, sy0, e / 24, 1.0))
-        a = math.atan2(side * 1.0, 0.25 if hx > pcx else -0.25)   # swim away from the bridge, toward the rim
-        sx, sy = sx0 + math.cos(a) * 2.4 * e, sy0 + math.sin(a) * 2.4 * e
-        fade = 1.0 if e < 28 else max(0.0, 1 - (e - 28) / 22)
-        out.append(("swim", sx, sy, a, fade, e))
+        # distance to the rim along the swim direction (water edge ~300 px from the pond centre)
+        def dist_c(t):
+            return math.hypot(sx0 + ux * t - pcx, sy0 + uy * t - pcy)
+        rim_t = 0.0
+        while dist_c(rim_t) < 296 and rim_t < 600:
+            rim_t += 2
+        swim_v = 3.0
+        swim_f = rim_t / swim_v
+        if e < 22:
+            out.append(("splash", sx0, sy0, e / 22, 1.0))
+        if e < swim_f:
+            t = e * swim_v
+            out.append(("swim", sx0 + ux * t, sy0 + uy * t, a, 1.0, e))
+        elif e < swim_f + 12:                              # climb out over the rocks
+            u = (e - swim_f) / 12
+            t = rim_t + 46 * u
+            out.append(("stand", sx0 + ux * t, sy0 + uy * t, u * 6, 1.0, a, True))
+        elif e < swim_f + 30:                              # walk off and fade into the dark
+            u = (e - swim_f - 12) / 18
+            t = rim_t + 46 + 36 * u
+            out.append(("stand", sx0 + ux * t, sy0 + uy * t, 6 + u * 8, 1.0 - u, a, True))
     return out
 
 
+def _flashlight(d, x, y, a, al):
+    ux, uy = math.cos(a), math.sin(a)
+    vx, vy = -uy, ux
+    L, W_ = 46, 18
+    pts = [(x + ux * 6 + vx * 2, y + uy * 6 + vy * 2), (x + ux * 6 - vx * 2, y + uy * 6 - vy * 2),
+           (x + ux * L - vx * W_, y + uy * L - vy * W_), (x + ux * L + vx * W_, y + uy * L + vy * W_)]
+    d.polygon(pts, fill=(255, 236, 190, int(46 * al)))
+    d.ellipse([x + ux * L - 14, y + uy * L - 12, x + ux * L + 14, y + uy * L + 12], fill=(255, 236, 190, int(30 * al)))
+
+
 def _draw_diver(body, item):
-    d = ImageDraw.Draw(body)
+    beam = Image.new("RGBA", body.size, (0, 0, 0, 0))
+    db = ImageDraw.Draw(beam)
+    fig = Image.new("RGBA", body.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(fig)
     kind = item[0]
+    olive, skin, dark = (88, 96, 66), (200, 166, 126), (18, 18, 20)
     if kind == "fall":
         _, x, y, sc, al = item
         a = int(255 * al)
-        s = 12 * sc
-        olive, skin = (70, 78, 52, a), (196, 160, 120, a)
-        # arched freefall pose: arms and legs spread
+        s_ = 17 * sc
         for (dx, dy) in ((-1.1, -0.9), (1.1, -0.9), (-0.8, 1.3), (0.8, 1.3)):
-            d.line([(x, y), (x + dx * s, y + dy * s)], fill=olive, width=max(2, int(3.6 * sc)))
-        d.ellipse([x - 0.55 * s, y - 0.7 * s, x + 0.55 * s, y + 0.7 * s], fill=olive)
-        d.ellipse([x - 0.4 * s, y - 1.3 * s, x + 0.4 * s, y - 0.55 * s], fill=(20, 20, 22, a))
+            d.line([(x, y), (x + dx * s_, y + dy * s_)], fill=olive + (a,), width=max(2, int(5 * sc)))
+        d.ellipse([x - 0.6 * s_, y - 0.75 * s_, x + 0.6 * s_, y + 0.75 * s_], fill=olive + (a,))
+        d.ellipse([x - 0.42 * s_, y - 1.35 * s_, x + 0.42 * s_, y - 0.55 * s_], fill=dark + (a,))
     elif kind == "stand":
-        _, x, y, step, al = item
+        _, x, y, step, al, h, light = item
         a = int(255 * al)
-        sway = math.sin(step * 12) * 1.2
-        d.ellipse([x - 5.6, y - 4.2 + sway * 0.4, x + 5.6, y + 4.2 + sway * 0.4], fill=(84, 92, 62, a))   # shoulders
-        d.ellipse([x - 3.0, y - 3.0, x + 3.0, y + 3.0], fill=(20, 20, 22, a))                            # helmet
+        ux, uy = math.cos(h), math.sin(h)
+        vx, vy = -uy, ux
+        if light:
+            _flashlight(db, x, y, h, al)
+        sw = math.sin(step * 2.2) * 3
+        for side in (-1, 1):                                # legs stepping
+            lx, ly = x - ux * 2 + vx * 3 * side, y - uy * 2 + vy * 3 * side
+            d.line([(lx, ly), (lx + ux * sw * side, ly + uy * sw * side)], fill=(40, 44, 32, a), width=3)
+        d.ellipse([x - 8, y - 6, x + 8, y + 6], fill=olive + (a,))                    # shoulders
+        d.line([(x + vx * 7, y + vy * 7), (x + vx * 7 + ux * 7, y + vy * 7 + uy * 7)], fill=skin + (a,), width=3)   # arm holding the light
+        d.ellipse([x + vx * 7 + ux * 6 - 2, y + vy * 7 + uy * 6 - 2, x + vx * 7 + ux * 6 + 2, y + vy * 7 + uy * 6 + 2],
+                  fill=(255, 244, 210, a))
+        d.ellipse([x - 4.4, y - 4.4, x + 4.4, y + 4.4], fill=dark + (a,))           # helmet
     elif kind == "splash":
         _, x, y, u, _ = item
         for k in range(3):
             v = u - k * 0.18
             if v <= 0:
                 continue
-            r = 4 + v * 26
-            a = int(150 * (1 - v))
-            d.ellipse([x - r, y - r * 0.8, x + r, y + r * 0.8], outline=(220, 236, 240, a), width=2)
+            r = 5 + v * 34
+            d.ellipse([x - r, y - r * 0.8, x + r, y + r * 0.8], outline=(220, 236, 240, int(150 * (1 - v))), width=2)
         if u < 0.3:
-            d.ellipse([x - 4, y - 3, x + 4, y + 3], fill=(240, 248, 250, int(200 * (1 - u / 0.3))))
+            d.ellipse([x - 6, y - 4, x + 6, y + 4], fill=(240, 248, 250, int(200 * (1 - u / 0.3))))
     elif kind == "swim":
         _, x, y, a_, fade, e = item
         al = int(255 * fade)
         ux, uy = math.cos(a_), math.sin(a_)
         vx, vy = -uy, ux
-        stroke = math.sin(e * 0.7)
-        # wake
+        _flashlight(db, x, y, a_, 0.7 * fade)
+        stroke = math.sin(e * 0.6)
         for k in (1, 2):
-            bx, by = x - ux * 12 * k, y - uy * 12 * k
-            d.line([(bx + vx * 3 * k, by + vy * 3 * k), (x - ux * 2, y - uy * 2), (bx - vx * 3 * k, by - vy * 3 * k)],
-                   fill=(200, 222, 230, int(80 * fade / k)), width=1)
-        d.ellipse([x - 3.4, y - 3.4, x + 3.4, y + 3.4], fill=(20, 20, 22, al))          # head
-        d.line([(x - ux * 3, y - uy * 3), (x - ux * 12, y - uy * 12)], fill=(84, 92, 62, al), width=4)
+            bx, by = x - ux * 16 * k, y - uy * 16 * k
+            d.line([(bx + vx * 4 * k, by + vy * 4 * k), (x - ux * 3, y - uy * 3), (bx - vx * 4 * k, by - vy * 4 * k)],
+                   fill=(200, 222, 230, int(90 * fade / k)), width=1)
+        d.line([(x - ux * 4, y - uy * 4), (x - ux * 17, y - uy * 17)], fill=olive + (al,), width=6)
         for side in (-1, 1):
-            reach = 7 + 5 * stroke * side
-            d.line([(x, y), (x + ux * reach + vx * 6 * side, y + uy * reach + vy * 6 * side)],
-                   fill=(196, 160, 120, al), width=2)
+            reach = 10 + 7 * stroke * side
+            d.line([(x, y), (x + ux * reach + vx * 8 * side, y + uy * reach + vy * 8 * side)], fill=skin + (al,), width=3)
+        d.ellipse([x - 5, y - 5, x + 5, y + 5], fill=dark + (al,))
+    body.alpha_composite(beam.filter(ImageFilter.GaussianBlur(3)))
+    body.alpha_composite(fig)
 
 
 def airport_planes(CW, CH, AX, phase):
