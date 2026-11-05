@@ -800,17 +800,18 @@ def main(src, dst):
 
     # wide canvas: the pond sits in a night garden that fades into the page
     CW, CH = 1200, 760
-    OX, OY = (CW - W) // 2, (CH - W) // 2
+    SW = 720  # on-canvas size of the pond scene (rendered at W, scaled up)
+    OX, OY = (CW - SW) // 2, (CH - SW) // 2
     page = np.array([13, 17, 23], np.float32) / 255.0
-    pcx, pcy = OX + W / 2, OY + W / 2
+    pcx, pcy = OX + SW / 2, OY + SW / 2
     traffic = Traffic(CW, CH, pcx, pcy, n_frames=n, ring_only=True)
     AX = int(pcx - traffic.ra - RING_W / 2 - 14)
     park_r = 0
     cityimg, windows, lamps, streets, sxs, sys_ = city(CW, CH, pcx, pcy, park_r, traffic, AX)
     park = garden(max(CW, CH))[:CH, :CW, :3] * 0.8
     yy, xx = np.mgrid[0:CH, 0:CW].astype(np.float32)
-    pd = np.hypot(xx - (OX + W / 2), yy - (OY + W / 2))
-    feather = np.clip((256 - pd) / 34, 0, 1)[..., None]
+    pd = np.hypot(xx - (OX + SW / 2), yy - (OY + SW / 2))
+    feather = np.clip((SW / 2 - pd) / 46, 0, 1)[..., None]
     ex = (xx - CW / 2) / (CW / 2)
     ey = (yy - CH / 2) / (CH / 2)
     e = (ex ** 4 + ey ** 4) ** 0.25
@@ -890,9 +891,10 @@ def main(src, dst):
         sq = sq + light_rays(W, phase)[..., None] * warm * 0.05
 
         out = outer.copy()
-        region = out[OY:OY + W, OX:OX + W]
-        f = feather[OY:OY + W, OX:OX + W]
-        out[OY:OY + W, OX:OX + W] = sq * f + region * (1 - f)
+        sq = np.asarray(Image.fromarray(np.clip(sq * 255, 0, 255).astype(np.uint8)).resize((SW, SW), Image.LANCZOS), np.float32) / 255.0
+        region = out[OY:OY + SW, OX:OX + SW]
+        f = feather[OY:OY + SW, OX:OX + SW]
+        out[OY:OY + SW, OX:OX + SW] = sq * f + region * (1 - f)
         out = out * shade
         (gsh, gbody, glights), (tsh, tbody, tlights) = traffic.frame(i)
         out = out * (1 - 0.6 * gsh)

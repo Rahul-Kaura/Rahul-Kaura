@@ -140,11 +140,6 @@ class Traffic:
         if self.ring_only:
             self.routes = []
             self.flows = []
-            for off, gap in ((RING_W / 4, 86), (-RING_W / 4, 104)):
-                ring = Path()
-                rp = self.ring_lane(off)
-                ring.add(rp + [rp[0]], "ground", V_RING)
-                self.flows.append((ring.finish(), gap, 1))
             return
         CW, CH, cx = self.CW, self.CH, self.cx
         HL, HR, yu, yl = self.HL, self.HR, self.y_up, self.y_lo
@@ -322,6 +317,8 @@ class Traffic:
         X = np.arange(CW * S, dtype=np.float32)[None, :] / S
         Y = np.arange(CH * S, dtype=np.float32)[:, None] / S
         sd = self.ring_sdf_grid(X, Y)
+        if self.ring_only:
+            return
         arr = np.asarray(img).copy()
         arr[np.abs(sd) < RING_W / 2] = asphalt
         arr[np.abs(np.abs(sd) - RING_W / 2) < 0.7] = edge
