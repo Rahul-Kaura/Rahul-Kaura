@@ -638,51 +638,109 @@ def planes_layer(CW, CH, phase):
 
 # ---------- airport at both ends ----------
 
-def pad_layout(CW, CH, AX):
-    """Main helipads on each side, plus two small corner pads with parked helicopters."""
-    main = [(AX * 0.5, CH * 0.5, 62), (CW - AX * 0.5, CH * 0.5, 62)]
-    corner = [(AX * 0.5, CH * 0.17, 50), (CW - AX * 0.5, CH * 0.83, 50)]
-    return main, corner
+def base_layout(CW, CH, AX):
+    """Military base on each side: two hangars (doors facing inward pads) and two pads."""
+    sides = []
+    for left in (True, False):
+        cx = AX * 0.5 if left else CW - AX * 0.5
+        hw, hh = 74, 50                       # hangar half sizes
+        hangars = [dict(x=cx, y=CH * 0.18, door=+1, hw=hw, hh=hh),     # door on its bottom edge
+                   dict(x=cx, y=CH * 0.82, door=-1, hw=hw, hh=hh)]     # door on its top edge
+        pads = [(cx, CH * 0.405), (cx, CH * 0.595)]
+        sides.append(dict(cx=cx, hangars=hangars, pads=pads, left=left))
+    return sides
 
 
 def draw_airport(img, CW, CH, AX, S):
-    """Rooftop helipads on both sides of the pond."""
+    """Concrete aprons, taxi lines, military pads, fence and containers (hangar roofs are drawn on top later)."""
     d = ImageDraw.Draw(img)
-    roof = (14, 15, 19)
-    d.rectangle([0, 0, AX * S, CH * S], fill=(9, 10, 13))
-    d.rectangle([(CW - AX) * S, 0, CW * S, CH * S], fill=(9, 10, 13))
-    main, corner = pad_layout(CW, CH, AX)
-    for (x, y, r) in main + corner:
-        b = r + 16
-        d.rectangle([(x - b + 5) * S, (y - b + 7) * S, (x + b + 5) * S, (y + b + 7) * S], fill=(4, 4, 6))
-        d.rectangle([(x - b) * S, (y - b) * S, (x + b) * S, (y + b) * S], fill=roof)
-        d.rectangle([(x - b) * S, (y - b) * S, (x + b) * S, (y - b + 2) * S], fill=(34, 36, 46))
-        d.ellipse([(x - r) * S, (y - r) * S, (x + r) * S, (y + r) * S], fill=(30, 32, 38))
-        d.ellipse([(x - r) * S, (y - r) * S, (x + r) * S, (y + r) * S], outline=(196, 160, 60), width=max(2, int(r / 18)) * S)
-        d.ellipse([(x - r * 0.82) * S, (y - r * 0.82) * S, (x + r * 0.82) * S, (y + r * 0.82) * S], outline=(120, 122, 130), width=S)
-        # the H
-        h, w, t = r * 0.42, r * 0.3, r * 0.09
-        col = (205, 206, 212)
-        d.rectangle([(x - w - t) * S, (y - h) * S, (x - w + t) * S, (y + h) * S], fill=col)
-        d.rectangle([(x + w - t) * S, (y - h) * S, (x + w + t) * S, (y + h) * S], fill=col)
-        d.rectangle([(x - w) * S, (y - t) * S, (x + w) * S, (y + t) * S], fill=col)
+    r = random.Random(77)
+    for side in base_layout(CW, CH, AX):
+        x0 = 0 if side["left"] else CW - AX
+        x1 = AX if side["left"] else CW
+        d.rectangle([x0 * S, 0, x1 * S, CH * S], fill=(12, 14, 11))
+        # concrete apron with expansion joints
+        ax0, ax1 = side["cx"] - 92, side["cx"] + 92
+        d.rectangle([ax0 * S, 0, ax1 * S, CH * S], fill=(31, 32, 31))
+        for yy in range(0, CH, 38):
+            d.line([(ax0 * S, yy * S), (ax1 * S, yy * S)], fill=(24, 25, 24), width=S)
+        for xx in (side["cx"] - 46, side["cx"], side["cx"] + 46):
+            d.line([(xx * S, 0), (xx * S, CH * S)], fill=(24, 25, 24), width=S)
+        # yellow taxi line linking hangar doors and pads
+        cx = side["cx"]
+        d.line([(cx * S, CH * 0.18 * S), (cx * S, CH * 0.82 * S)], fill=(196, 160, 40), width=S)
+        for (px, py) in side["pads"]:
+            d.rectangle([(px - 44) * S, (py - 44) * S, (px + 44) * S, (py + 44) * S], fill=(38, 39, 37))
+            d.rectangle([(px - 44) * S, (py - 44) * S, (px + 44) * S, (py + 44) * S], outline=(200, 200, 204), width=S)
+            d.ellipse([(px - 36) * S, (py - 36) * S, (px + 36) * S, (py + 36) * S], outline=(196, 160, 40), width=2 * S)
+            h, w, t = 15, 11, 3.2
+            col = (210, 210, 214)
+            d.rectangle([(px - w - t) * S, (py - h) * S, (px - w + t) * S, (py + h) * S], fill=col)
+            d.rectangle([(px + w - t) * S, (py - h) * S, (px + w + t) * S, (py + h) * S], fill=col)
+            d.rectangle([(px - w) * S, (py - t) * S, (px + w) * S, (py + t) * S], fill=col)
+        # perimeter fence on the outer edge
+        fx = 8 if side["left"] else CW - 8
+        for yy in range(0, CH, 8):
+            d.line([(fx * S, yy * S), (fx * S, (yy + 5) * S)], fill=(70, 72, 70), width=S)
+        # stacked containers beside the hangars
+        for k in range(6):
+            yy = r.uniform(CH * 0.27, CH * 0.73)
+            xx = (ax0 - 18) if side["left"] else (ax1 + 6)
+            if not side["left"]:
+                xx = ax1 + 6
+            col = r.choice([(58, 64, 44), (74, 62, 42), (44, 52, 58)])
+            d.rectangle([xx * S, yy * S, (xx + 12) * S, (yy + 26) * S], fill=col)
+            d.line([(xx * S, (yy + 13) * S), ((xx + 12) * S, (yy + 13) * S)], fill=tuple(int(c * 0.7) for c in col), width=S)
+
+
+def hangar_roofs(CW, CH, AX):
+    """RGBA overlay of the hangar roofs with an open, dark doorway."""
+    S = 2
+    lay = Image.new("RGBA", (CW * S, CH * S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(lay)
+    for side in base_layout(CW, CH, AX):
+        for hg in side["hangars"]:
+            x, y, hw, hh = hg["x"], hg["y"], hg["hw"], hg["hh"]
+            d.rectangle([(x - hw + 6) * S, (y - hh + 8) * S, (x + hw + 6) * S, (y + hh + 8) * S], fill=(0, 0, 0, 150))
+            d.rectangle([(x - hw) * S, (y - hh) * S, (x + hw) * S, (y + hh) * S], fill=(46, 52, 40, 255))
+            # ribbed arched roof: ribs run across, lighter toward the moonlit side
+            for k in range(int(-hw), int(hw), 6):
+                t = (k + hw) / (2 * hw)
+                shade = 0.7 + 0.5 * math.sin(t * math.pi)
+                col = (int(50 * shade), int(57 * shade), int(44 * shade), 255)
+                d.rectangle([(x + k) * S, (y - hh) * S, (x + k + 4) * S, (y + hh) * S], fill=col)
+            d.rectangle([(x - hw) * S, (y - hh) * S, (x + hw) * S, (y + hh) * S], outline=(20, 22, 18, 255), width=S)
+            # open doorway: a dark band on the door edge
+            dy = y + hh * hg["door"]
+            d.rectangle([(x - hw * 0.62) * S, (dy - 3) * S, (x + hw * 0.62) * S, (dy + 3) * S], fill=(8, 8, 8, 255))
+            # roof number
+            d.rectangle([(x - 6) * S, (y - 10) * S, (x + 6) * S, (y + 10) * S], fill=(0, 0, 0, 0))
+    lay = lay.resize((CW, CH), Image.LANCZOS)
+    return lay
 
 
 def airport_lights(CW, CH, AX):
-    """Steady perimeter lights around each helipad."""
+    """Steady floodlights and pad edge lights."""
     glow = Image.new("RGB", (CW, CH), (0, 0, 0))
     core = Image.new("RGB", (CW, CH), (0, 0, 0))
     dg, dc = ImageDraw.Draw(glow), ImageDraw.Draw(core)
-    main, corner = pad_layout(CW, CH, AX)
-    for (x, y, r) in main + corner:
-        n = 16 if r > 40 else 10
-        for k in range(n):
-            a = 2 * math.pi * k / n
-            lx, ly = x + (r + 6) * math.cos(a), y + (r + 6) * math.sin(a)
-            col = (90, 255, 140) if k % 2 == 0 else (255, 214, 120)
-            dg.ellipse([lx - 5, ly - 5, lx + 5, ly + 5], fill=tuple(int(c * 0.4) for c in col))
-            dc.ellipse([lx - 1.1, ly - 1.1, lx + 1.1, ly + 1.1], fill=col)
-    g = np.asarray(glow.filter(ImageFilter.GaussianBlur(3)), np.float32) / 255.0
+
+    def lamp(x, y, col, g=5, r=1.1, k=0.45):
+        dg.ellipse([x - g, y - g, x + g, y + g], fill=tuple(int(c * k) for c in col))
+        dc.ellipse([x - r, y - r, x + r, y + r], fill=col)
+
+    for side in base_layout(CW, CH, AX):
+        for (px, py) in side["pads"]:
+            for k in range(-4, 5):
+                for (lx, ly) in ((px + k * 11, py - 48), (px + k * 11, py + 48), (px - 48, py + k * 11), (px + 48, py + k * 11)):
+                    lamp(lx, ly, (255, 214, 110), g=4, r=1.0, k=0.5)
+        for hg in side["hangars"]:
+            dy = hg["y"] + (hg["hh"] + 8) * hg["door"]
+            for xo in (-hg["hw"] * 0.7, hg["hw"] * 0.7):
+                lamp(hg["x"] + xo, dy, (255, 228, 170), g=9, r=1.4, k=0.3)
+        for yy in range(30, CH, 60):
+            lamp(side["cx"] + 6, yy, (80, 130, 255), g=4, r=1.0, k=0.5)
+    g = np.asarray(glow.filter(ImageFilter.GaussianBlur(4)), np.float32) / 255.0
     c = np.asarray(core.filter(ImageFilter.GaussianBlur(0.5)), np.float32) / 255.0
     return g + c
 
@@ -700,7 +758,7 @@ def heli_sprite():
     def P(x, y):
         return ((cx + x) * S, (cy + y) * S)
 
-    body, hi, dark, gold = (48, 50, 60, 255), (118, 122, 138, 255), (14, 14, 18, 255), (214, 172, 58, 255)
+    body, hi, dark, gold = (62, 70, 48, 255), (120, 130, 96, 255), (16, 18, 14, 255), (214, 172, 58, 255)
     # skids
     for sy in (-7.5, 7.5):
         d.rounded_rectangle([*P(-11, sy - 0.8), *P(11, sy + 0.8)], radius=0.8 * S, fill=(60, 62, 70, 255))
@@ -766,86 +824,136 @@ def _heli_draw(body, shadow, glow, core, beam, x, y, h, alt, frame, CW, CH):
         db.ellipse([bx - rr, by - rr * 0.85, bx + rr, by + rr * 0.85], fill=int(120 * alt))
 
 
-def heli_state(t, pad, exit_pt, entry_pt, rest_h):
-    """One pad's loop: rest, lift and depart toward exit_pt, while another arrives from entry_pt and lands.
-
-    Returns a list of (x, y, heading, altitude) for helicopters visible at time t in [0, 1).
-    """
-    px, py = pad
-    out = []
-
-    def ease(u):
-        return u * u * (3 - 2 * u)
-
-    # departing helicopter
-    if t < 0.32:
-        out.append((px, py, rest_h, 0.0))
-    elif t < 0.44:
-        u = (t - 0.32) / 0.12
-        h_to = math.atan2(exit_pt[1] - py, exit_pt[0] - px)
-        out.append((px, py, rest_h + (_ang(h_to - rest_h)) * ease(u), ease(u)))
-    elif t < 0.96:
-        u = (t - 0.44) / 0.52
-        e = u ** 1.5
-        h = math.atan2(exit_pt[1] - py, exit_pt[0] - px)
-        out.append((px + (exit_pt[0] - px) * e, py + (exit_pt[1] - py) * e, h, 1.0))
-    # arriving helicopter
-    if 0.42 <= t < 0.86:
-        u = (t - 0.42) / 0.44
-        e = 1 - (1 - u) ** 1.6
-        h = math.atan2(py - entry_pt[1], px - entry_pt[0])
-        out.append((entry_pt[0] + (px - entry_pt[0]) * e, entry_pt[1] + (py - entry_pt[1]) * e, h, 1.0))
-    elif t >= 0.86:
-        u = (t - 0.86) / 0.14
-        h_from = math.atan2(py - entry_pt[1], px - entry_pt[0])
-        out.append((px, py, h_from + _ang(rest_h - h_from) * ease(u), 1 - ease(u)))
-    return out
-
-
 def _ang(a):
     return (a + math.pi) % (2 * math.pi) - math.pi
 
 
+ROOFS = None
+SORTIES = None
+
+
+def _build_sorties(CW, CH, AX, n):
+    """Seeded, irregular schedule of flights. Each starts and ends inside a hangar, so it loops."""
+    sides = base_layout(CW, CH, AX)
+    L, R = sides
+    r = random.Random(1986)
+    # (from side, from index, to side, to index): index 0 = top hangar/pad, 1 = bottom
+    plans = [(L, 0, R, 1), (R, 0, L, 1), (L, 1, R, 0), (R, 1, L, 0), (L, 0, L, 1), (R, 1, R, 0)]
+    starts = [0.00, 0.19, 0.41, 0.55, 0.73, 0.88]
+    out = []
+    for (fs, fi, ts, ti), st in zip(plans, starts):
+        cross = fs is not ts
+        fly = int(r.uniform(56, 70) if cross else r.uniform(40, 50))
+        hg0, pad0 = fs["hangars"][fi], fs["pads"][fi]
+        hg1, pad1 = ts["hangars"][ti], ts["pads"][ti]
+        # curved flight over the pond, with a random swing
+        mx = CW / 2 + r.uniform(-120, 120)
+        my = CH / 2 + r.uniform(-150, 150)
+        c1 = (pad0[0] + (mx - pad0[0]) * 0.6, pad0[1] + (my - pad0[1]) * 0.9 + r.uniform(-60, 60))
+        c2 = (pad1[0] + (mx - pad1[0]) * 0.6, pad1[1] + (my - pad1[1]) * 0.9 + r.uniform(-60, 60))
+        flight = bezier(pad0, c1, c2, pad1, 80)
+        P = np.array(flight)
+        cum = np.concatenate([[0], np.cumsum(np.hypot(*(P[1:] - P[:-1]).T))])
+        out.append(dict(start=int(st * n + r.randint(0, 6)), taxi=r.randint(11, 15), lift=r.randint(9, 12), fly=fly,
+                        land=r.randint(9, 12), taxi_in=r.randint(11, 15),
+                        h0=(hg0["x"], hg0["y"]), d0=(hg0["x"], hg0["y"] + hg0["hh"] * hg0["door"]), p0=pad0,
+                        h1=(hg1["x"], hg1["y"]), d1=(hg1["x"], hg1["y"] + hg1["hh"] * hg1["door"]), p1=pad1,
+                        P=P, cum=cum))
+    return out
+
+
+def bezier(p0, p1, p2, p3, k=28):
+    pts = []
+    for i in range(k + 1):
+        t = i / k
+        a, b, c, d = (1 - t) ** 3, 3 * (1 - t) ** 2 * t, 3 * (1 - t) * t * t, t ** 3
+        pts.append((a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0], a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1]))
+    return pts
+
+
+def _lerp(a, b, u):
+    return (a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u)
+
+
+def _sortie_state(so, frame, n):
+    """(x, y, heading, altitude) or None while it's inside a hangar."""
+    tau = (frame - so["start"]) % n
+    ease = lambda u: u * u * (3 - 2 * u)
+    t1 = so["taxi"]; t2 = t1 + so["lift"]; t3 = t2 + so["fly"]; t4 = t3 + so["land"]; t5 = t4 + so["taxi_in"]
+    if tau < t1:  # roll out of the hangar to the pad
+        u = ease(tau / t1)
+        pts = [so["h0"], so["d0"], so["p0"]]
+        x, y = _lerp(pts[0], pts[1], min(1, u * 2)) if u < 0.5 else _lerp(pts[1], pts[2], (u - 0.5) * 2)
+        h = math.atan2(so["p0"][1] - so["h0"][1], so["p0"][0] - so["h0"][0])
+        return x, y, h, 0.0
+    if tau < t2:  # lift off, turning toward the flight path
+        u = ease((tau - t1) / so["lift"])
+        h0 = math.atan2(so["p0"][1] - so["h0"][1], so["p0"][0] - so["h0"][0])
+        P = so["P"]
+        h1 = math.atan2(P[3][1] - P[0][1], P[3][0] - P[0][0])
+        return so["p0"][0], so["p0"][1], h0 + _ang(h1 - h0) * u, u
+    if tau < t3:  # fly over the pond
+        u = (tau - t2) / so["fly"]
+        u = 0.5 - 0.5 * math.cos(math.pi * u)
+        s_ = u * so["cum"][-1]
+        i = int(np.clip(np.searchsorted(so["cum"], s_) - 1, 0, len(so["P"]) - 2))
+        f = (s_ - so["cum"][i]) / max(so["cum"][i + 1] - so["cum"][i], 1e-6)
+        x, y = so["P"][i] * (1 - f) + so["P"][i + 1] * f
+        dx, dy = so["P"][i + 1] - so["P"][i]
+        return float(x), float(y), math.atan2(dy, dx), 1.0
+    if tau < t4:  # settle onto the pad, turning to face the hangar
+        u = ease((tau - t3) / so["land"])
+        P = so["P"]
+        h0 = math.atan2(P[-1][1] - P[-4][1], P[-1][0] - P[-4][0])
+        h1 = math.atan2(so["h1"][1] - so["p1"][1], so["h1"][0] - so["p1"][0])
+        return so["p1"][0], so["p1"][1], h0 + _ang(h1 - h0) * u, 1 - u
+    if tau < t5:  # taxi into the hangar
+        u = ease((tau - t4) / so["taxi_in"])
+        x, y = _lerp(so["p1"], so["d1"], min(1, u * 2)) if u < 0.5 else _lerp(so["d1"], so["h1"], (u - 0.5) * 2)
+        h = math.atan2(so["h1"][1] - so["p1"][1], so["h1"][0] - so["p1"][0])
+        return x, y, h, 0.0
+    return None
+
+
 def airport_planes(CW, CH, AX, phase):
-    """Helicopters taking off from and landing on the side pads, crossing over the pond."""
-    body = Image.new("RGBA", (CW, CH), (0, 0, 0, 0))
-    shadow = Image.new("L", (CW, CH), 0)
-    glow = Image.new("RGB", (CW, CH), (0, 0, 0))
-    core = Image.new("RGB", (CW, CH), (0, 0, 0))
-    beam = Image.new("L", (CW, CH), 0)
-    frame = int(round(phase * 120))
-    main, corner = pad_layout(CW, CH, AX)
-    (lx, ly, _), (rx, ry, _) = main
-    helis = []
-    helis += heli_state(phase, (lx, ly), (CW * 0.62, -90), (CW * 0.42, CH + 90), 0.0)
-    helis += heli_state((phase + 0.5) % 1.0, (rx, ry), (CW * 0.38, CH + 90), (CW * 0.58, -90), math.pi)
-    # parked helicopters on the corner pads, rotors at rest
-    parked = [(x, y, 0.35 if i == 0 else math.pi + 0.35) for i, (x, y, r) in enumerate(corner)]
-    # draw lower ones first so higher helicopters sit on top
-    for (x, y, h, alt) in sorted(helis, key=lambda v: v[3]):
-        _heli_draw(body, shadow, glow, core, beam, x, y, h, alt, frame, CW, CH)
-    for (x, y, h) in parked:
-        global HELI
-        if HELI is None:
-            HELI = heli_sprite()
-        rot = HELI.rotate(-math.degrees(h), resample=Image.BICUBIC, expand=True)
-        small = rot.resize((rot.width * 2 // 3, rot.height * 2 // 3), Image.LANCZOS)
-        ux, uy = math.cos(h), math.sin(h)
-        px, py = int(x - small.width / 2 - ux * 12), int(y - small.height / 2 - uy * 12)
-        _paste_mask(shadow, small.getchannel("A").point(lambda v: int(v * 0.8)), px + 5, py + 7)
-        _paste_rgba(body, small, px, py)
-        db = ImageDraw.Draw(body)
-        for k in range(2):
-            a = 0.6 + k * math.pi / 2
-            db.line([(x - 40 * math.cos(a), y - 40 * math.sin(a)), (x + 40 * math.cos(a), y + 40 * math.sin(a))],
-                    fill=(70, 72, 82, 255), width=3)
-    sh = np.asarray(shadow.filter(ImageFilter.GaussianBlur(4)), np.float32)[..., None] / 255.0
-    b = np.asarray(body, np.float32) / 255.0
-    bm = np.asarray(beam.filter(ImageFilter.GaussianBlur(10)), np.float32)[..., None] / 255.0
-    lights = (np.asarray(glow.filter(ImageFilter.GaussianBlur(5)), np.float32) / 255.0 +
-              np.asarray(core.filter(ImageFilter.GaussianBlur(0.5)), np.float32) / 255.0 +
+    """Helicopters rolling out of hangars, flying over the pond and returning to hangars."""
+    global ROOFS, SORTIES
+    n = 120
+    frame = int(round(phase * n)) % n
+    if ROOFS is None:
+        ROOFS = hangar_roofs(CW, CH, AX)
+        SORTIES = _build_sorties(CW, CH, AX, n)
+    lv = {}
+    for k in ("g", "f"):
+        lv[k] = dict(body=Image.new("RGBA", (CW, CH), (0, 0, 0, 0)), shadow=Image.new("L", (CW, CH), 0),
+                     glow=Image.new("RGB", (CW, CH), (0, 0, 0)), core=Image.new("RGB", (CW, CH), (0, 0, 0)),
+                     beam=Image.new("L", (CW, CH), 0))
+    states = [st for st in (_sortie_state(so, frame, n) for so in SORTIES) if st is not None]
+    for (x, y, h, alt) in sorted(states, key=lambda v: v[3]):
+        L = lv["f" if alt > 0.12 else "g"]
+        _heli_draw(L["body"], L["shadow"], L["glow"], L["core"], L["beam"], x, y, h, alt, frame, CW, CH)
+    # hangar roofs cover anything on the ground beneath them
+    g = lv["g"]
+    roof_a = np.asarray(ROOFS.getchannel("A"), np.float32)[..., None] / 255.0
+    g["body"].alpha_composite(ROOFS)
+
+    def pack(L, cover):
+        sh = np.asarray(L["shadow"].filter(ImageFilter.GaussianBlur(4)), np.float32)[..., None] / 255.0
+        b = np.asarray(L["body"], np.float32) / 255.0
+        bm = np.asarray(L["beam"].filter(ImageFilter.GaussianBlur(10)), np.float32)[..., None] / 255.0
+        li = (np.asarray(L["glow"].filter(ImageFilter.GaussianBlur(5)), np.float32) / 255.0 +
+              np.asarray(L["core"].filter(ImageFilter.GaussianBlur(0.5)), np.float32) / 255.0 +
               bm * np.array([1.0, 0.95, 0.82], np.float32) * 0.55)
-    return sh, b, lights
+        return sh * (1 - cover), b, li * (1 - cover)
+
+    gsh, gb, gl = pack(g, roof_a)
+    fsh, fb, fl = pack(lv["f"], 0)
+    # merge: ground layer (with roofs) first, flying helicopters on top
+    a1, a2 = gb[..., 3:4], fb[..., 3:4]
+    rgb = gb[..., :3] * a1 * (1 - a2) + fb[..., :3] * a2
+    alpha = a2 + a1 * (1 - a2)
+    body = np.concatenate([np.where(alpha > 0, rgb / np.maximum(alpha, 1e-6), 0), alpha], -1)
+    return np.maximum(gsh, fsh), body, gl + fl
 
 
 def _paste_rgba(dst, src, px, py):
