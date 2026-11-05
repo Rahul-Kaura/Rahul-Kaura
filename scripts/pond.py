@@ -638,122 +638,213 @@ def planes_layer(CW, CH, phase):
 
 # ---------- airport at both ends ----------
 
-RWY_W, TWY_W = 44, 16
-
-
-def airport_layout(CW, AX):
-    left = dict(rx=AX * 0.5, tx=AX * 0.5 + 62)
-    right = dict(rx=CW - AX * 0.5, tx=CW - AX * 0.5 - 62)
-    return left, right
+def pad_layout(CW, CH, AX):
+    """Main helipads on each side, plus two small corner pads with parked helicopters."""
+    main = [(AX * 0.5, CH * 0.5, 62), (CW - AX * 0.5, CH * 0.5, 62)]
+    corner = [(AX * 0.5, CH * 0.17, 50), (CW - AX * 0.5, CH * 0.83, 50)]
+    return main, corner
 
 
 def draw_airport(img, CW, CH, AX, S):
+    """Rooftop helipads on both sides of the pond."""
     d = ImageDraw.Draw(img)
-    ground = (9, 13, 12)
-    d.rectangle([0, 0, AX * S, CH * S], fill=ground)
-    d.rectangle([(CW - AX) * S, 0, CW * S, CH * S], fill=ground)
-    for side in airport_layout(CW, AX):
-        rx, tx = side["rx"], side["tx"]
-        # taxiway and links to the runway
-        d.rectangle([(tx - TWY_W / 2) * S, 0, (tx + TWY_W / 2) * S, CH * S], fill=(22, 23, 28))
-        d.line([(tx * S, 0), (tx * S, CH * S)], fill=(150, 120, 34), width=max(1, S // 2))
-        for y in (CH * 0.28, CH * 0.72):
-            d.polygon([((rx) * S, (y - 30) * S), ((tx) * S, (y - 4) * S), ((tx) * S, (y + 12) * S), ((rx) * S, (y - 14) * S)], fill=(22, 23, 28))
-        # runway
-        d.rectangle([(rx - RWY_W / 2) * S, 0, (rx + RWY_W / 2) * S, CH * S], fill=(26, 27, 32))
-        for xe in (rx - RWY_W / 2 + 1.5, rx + RWY_W / 2 - 1.5):
-            d.line([(xe * S, 0), (xe * S, CH * S)], fill=(150, 150, 156), width=S)
-        for y in range(0, CH, 34):
-            d.rectangle([(rx - 0.9) * S, y * S, (rx + 0.9) * S, (y + 18) * S], fill=(176, 176, 182))
-        # threshold piano keys and touchdown bars near each end
-        for y0 in (26, CH - 44):
-            for k in range(-4, 5):
-                if k == 0:
-                    continue
-                xk = rx + k * 4.2
-                d.rectangle([(xk - 1.3) * S, y0 * S, (xk + 1.3) * S, (y0 + 18) * S], fill=(176, 176, 182))
-        for y0 in (78, CH - 96):
-            for xo in (-12, 9):
-                d.rectangle([(rx + xo) * S, y0 * S, (rx + xo + 3) * S, (y0 + 18) * S], fill=(150, 150, 156))
+    roof = (14, 15, 19)
+    d.rectangle([0, 0, AX * S, CH * S], fill=(9, 10, 13))
+    d.rectangle([(CW - AX) * S, 0, CW * S, CH * S], fill=(9, 10, 13))
+    main, corner = pad_layout(CW, CH, AX)
+    for (x, y, r) in main + corner:
+        b = r + 16
+        d.rectangle([(x - b + 5) * S, (y - b + 7) * S, (x + b + 5) * S, (y + b + 7) * S], fill=(4, 4, 6))
+        d.rectangle([(x - b) * S, (y - b) * S, (x + b) * S, (y + b) * S], fill=roof)
+        d.rectangle([(x - b) * S, (y - b) * S, (x + b) * S, (y - b + 2) * S], fill=(34, 36, 46))
+        d.ellipse([(x - r) * S, (y - r) * S, (x + r) * S, (y + r) * S], fill=(30, 32, 38))
+        d.ellipse([(x - r) * S, (y - r) * S, (x + r) * S, (y + r) * S], outline=(196, 160, 60), width=max(2, int(r / 18)) * S)
+        d.ellipse([(x - r * 0.82) * S, (y - r * 0.82) * S, (x + r * 0.82) * S, (y + r * 0.82) * S], outline=(120, 122, 130), width=S)
+        # the H
+        h, w, t = r * 0.42, r * 0.3, r * 0.09
+        col = (205, 206, 212)
+        d.rectangle([(x - w - t) * S, (y - h) * S, (x - w + t) * S, (y + h) * S], fill=col)
+        d.rectangle([(x + w - t) * S, (y - h) * S, (x + w + t) * S, (y + h) * S], fill=col)
+        d.rectangle([(x - w) * S, (y - t) * S, (x + w) * S, (y + t) * S], fill=col)
 
 
 def airport_lights(CW, CH, AX):
+    """Steady perimeter lights around each helipad."""
     glow = Image.new("RGB", (CW, CH), (0, 0, 0))
     core = Image.new("RGB", (CW, CH), (0, 0, 0))
     dg, dc = ImageDraw.Draw(glow), ImageDraw.Draw(core)
-
-    def lamp(x, y, col, g=5, r=1.1, k=0.45):
-        dg.ellipse([x - g, y - g, x + g, y + g], fill=tuple(int(c * k) for c in col))
-        dc.ellipse([x - r, y - r, x + r, y + r], fill=col)
-
-    for side in airport_layout(CW, AX):
-        rx, tx = side["rx"], side["tx"]
-        for y in range(8, CH, 40):
-            for xe in (rx - RWY_W / 2 - 3, rx + RWY_W / 2 + 3):
-                lamp(xe, y, (255, 246, 214))
-        for y in range(14, CH, 48):
-            for xe in (tx - TWY_W / 2 - 3, tx + TWY_W / 2 + 3):
-                lamp(xe, y, (70, 120, 255), g=4, r=1.0, k=0.5)
-        for k in range(-5, 6):
-            lamp(rx + k * 4, 18, (60, 255, 120), g=4, r=1.0)
-            lamp(rx + k * 4, CH - 18, (255, 60, 50), g=4, r=1.0)
+    main, corner = pad_layout(CW, CH, AX)
+    for (x, y, r) in main + corner:
+        n = 16 if r > 40 else 10
+        for k in range(n):
+            a = 2 * math.pi * k / n
+            lx, ly = x + (r + 6) * math.cos(a), y + (r + 6) * math.sin(a)
+            col = (90, 255, 140) if k % 2 == 0 else (255, 214, 120)
+            dg.ellipse([lx - 5, ly - 5, lx + 5, ly + 5], fill=tuple(int(c * 0.4) for c in col))
+            dc.ellipse([lx - 1.1, ly - 1.1, lx + 1.1, ly + 1.1], fill=col)
     g = np.asarray(glow.filter(ImageFilter.GaussianBlur(3)), np.float32) / 255.0
     c = np.asarray(core.filter(ImageFilter.GaussianBlur(0.5)), np.float32) / 255.0
     return g + c
 
 
+HELI = None
+
+
+def heli_sprite():
+    """Top-down helicopter body (no main rotor), facing +x, drawn at 3x."""
+    S = 3
+    img = Image.new("RGBA", (80 * S, 40 * S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    cx, cy = 46, 20
+
+    def P(x, y):
+        return ((cx + x) * S, (cy + y) * S)
+
+    body, hi, dark, gold = (48, 50, 60, 255), (118, 122, 138, 255), (14, 14, 18, 255), (214, 172, 58, 255)
+    # skids
+    for sy in (-7.5, 7.5):
+        d.rounded_rectangle([*P(-11, sy - 0.8), *P(11, sy + 0.8)], radius=0.8 * S, fill=(60, 62, 70, 255))
+    # tail boom, fin and tail rotor
+    d.polygon([P(-8, -1.8), P(-36, -0.9), P(-36, 0.9), P(-8, 1.8)], fill=body)
+    d.rectangle([*P(-39, -5), *P(-35, 5)], fill=body)
+    d.ellipse([*P(-41, 3), *P(-33, 9)], fill=(120, 124, 136, 90))
+    # cabin
+    d.ellipse([*P(-12, -7), *P(14, 7)], fill=body)
+    d.ellipse([*P(-9, -5.4), *P(10, -1.5)], fill=hi)
+    d.ellipse([*P(4, -5.2), *P(14, 5.2)], fill=(30, 40, 58, 255))      # canopy glass
+    d.ellipse([*P(6, -3.6), *P(11, -1)], fill=(80, 96, 122, 255))
+    d.rectangle([*P(-10, -0.6), *P(3, 0.6)], fill=gold)                 # gold stripe
+    d.ellipse([*P(-3, -2.4), *P(2, 2.4)], fill=dark)                    # rotor hub
+    return img
+
+
+def _heli_draw(body, shadow, glow, core, beam, x, y, h, alt, frame, CW, CH):
+    global HELI
+    if HELI is None:
+        HELI = heli_sprite()
+    scale = 2.0 * (1.0 + 0.3 * alt)
+    rot = HELI.rotate(-math.degrees(h), resample=Image.BICUBIC, expand=True)
+    w, hh = int(rot.width / 3 * scale), int(rot.height / 3 * scale)
+    small = rot.resize((max(1, w), max(1, hh)), Image.LANCZOS)
+    # hub sits 46px from the sprite's left edge in a 80px-wide sprite: offset the sprite so the hub is at (x, y)
+    off = (46 - 40) * scale
+    ux, uy = math.cos(h), math.sin(h)
+    px, py = int(x - w / 2 - ux * off), int(y - hh / 2 - uy * off)
+    # shadow drifts away from the helicopter as it climbs
+    sdx, sdy = 6 + 60 * alt, 8 + 74 * alt
+    sm = small.getchannel("A").point(lambda v: int(v * (0.8 - 0.5 * alt)))
+    _paste_mask(shadow, sm, int(px + sdx), int(py + sdy))
+    R = 22 * scale
+    sd = ImageDraw.Draw(shadow)
+    sd.ellipse([x + sdx - R, y + sdy - R, x + sdx + R, y + sdy + R], fill=int(40 * (1 - 0.6 * alt)))
+    _paste_rgba(body, small, px, py)
+    # spinning main rotor: soft disc plus faint blades
+    disc = Image.new("RGBA", (int(R * 2 + 4), int(R * 2 + 4)), (0, 0, 0, 0))
+    dd = ImageDraw.Draw(disc)
+    c = disc.width / 2
+    dd.ellipse([c - R, c - R, c + R, c + R], fill=(150, 156, 170, 34), outline=(170, 176, 190, 60))
+    a0 = math.radians(frame * 41)
+    for k in range(4):
+        a = a0 + k * math.pi / 2
+        dd.line([(c, c), (c + R * math.cos(a), c + R * math.sin(a))], fill=(190, 194, 206, 70), width=2)
+    disc = disc.filter(ImageFilter.GaussianBlur(0.8))
+    _paste_rgba(body, disc, int(x - c), int(y - c))
+    # steady navigation lights and a downward searchlight that sweeps gently
+    vx, vy = -uy, ux
+    dg, dc = ImageDraw.Draw(glow), ImageDraw.Draw(core)
+    for (lx, ly, col) in ((x - vx * 7 * scale, y - vy * 7 * scale, (255, 70, 60)),
+                          (x + vx * 7 * scale, y + vy * 7 * scale, (70, 255, 140)),
+                          (x - ux * 36 * scale, y - uy * 36 * scale, (255, 248, 230))):
+        dg.ellipse([lx - 6, ly - 6, lx + 6, ly + 6], fill=tuple(int(c_ * 0.45) for c_ in col))
+        dc.ellipse([lx - 1.2, ly - 1.2, lx + 1.2, ly + 1.2], fill=col)
+    if alt > 0.05:
+        sweep = 0.5 * math.sin(frame * 2 * math.pi / 60)
+        bx = x + sdx * 0.8 + ux * 30 + vx * 26 * sweep
+        by = y + sdy * 0.8 + uy * 30 + vy * 26 * sweep
+        rr = 26 + 14 * alt
+        db = ImageDraw.Draw(beam)
+        db.ellipse([bx - rr, by - rr * 0.85, bx + rr, by + rr * 0.85], fill=int(120 * alt))
+
+
+def heli_state(t, pad, exit_pt, entry_pt, rest_h):
+    """One pad's loop: rest, lift and depart toward exit_pt, while another arrives from entry_pt and lands.
+
+    Returns a list of (x, y, heading, altitude) for helicopters visible at time t in [0, 1).
+    """
+    px, py = pad
+    out = []
+
+    def ease(u):
+        return u * u * (3 - 2 * u)
+
+    # departing helicopter
+    if t < 0.32:
+        out.append((px, py, rest_h, 0.0))
+    elif t < 0.44:
+        u = (t - 0.32) / 0.12
+        h_to = math.atan2(exit_pt[1] - py, exit_pt[0] - px)
+        out.append((px, py, rest_h + (_ang(h_to - rest_h)) * ease(u), ease(u)))
+    elif t < 0.96:
+        u = (t - 0.44) / 0.52
+        e = u ** 1.5
+        h = math.atan2(exit_pt[1] - py, exit_pt[0] - px)
+        out.append((px + (exit_pt[0] - px) * e, py + (exit_pt[1] - py) * e, h, 1.0))
+    # arriving helicopter
+    if 0.42 <= t < 0.86:
+        u = (t - 0.42) / 0.44
+        e = 1 - (1 - u) ** 1.6
+        h = math.atan2(py - entry_pt[1], px - entry_pt[0])
+        out.append((entry_pt[0] + (px - entry_pt[0]) * e, entry_pt[1] + (py - entry_pt[1]) * e, h, 1.0))
+    elif t >= 0.86:
+        u = (t - 0.86) / 0.14
+        h_from = math.atan2(py - entry_pt[1], px - entry_pt[0])
+        out.append((px, py, h_from + _ang(rest_h - h_from) * ease(u), 1 - ease(u)))
+    return out
+
+
+def _ang(a):
+    return (a + math.pi) % (2 * math.pi) - math.pi
+
+
 def airport_planes(CW, CH, AX, phase):
-    """A takeoff on the left runway and a landing on the right one, looping seamlessly."""
-    global PLANE
-    if PLANE is None:
-        PLANE = plane_sprite()
-    spr, L, span = PLANE
-    left, right = airport_layout(CW, AX)
+    """Helicopters taking off from and landing on the side pads, crossing over the pond."""
     body = Image.new("RGBA", (CW, CH), (0, 0, 0, 0))
     shadow = Image.new("L", (CW, CH), 0)
     glow = Image.new("RGB", (CW, CH), (0, 0, 0))
     core = Image.new("RGB", (CW, CH), (0, 0, 0))
-    dg, dc = ImageDraw.Draw(glow), ImageDraw.Draw(core)
-    span_y = CH + 130
-    flights = []
-    # takeoff: rolls in slowly from the bottom, speeds up, lifts off near the top
-    t = phase
-    y = CH + 50 - span_y * t ** 1.55
-    alt = min(1.0, max(0.0, (CH * 0.45 - y) / (CH * 0.6)))
-    flights.append((left["rx"], y, -math.pi / 2, alt))
-    # landing: comes in high from the top, touches down, slows to a roll
-    t = (phase + 0.5) % 1.0
-    y = -80 + span_y * (1 - (1 - t) ** 1.55)
-    alt = min(1.0, max(0.0, (CH * 0.38 - y) / (CH * 0.5)))
-    flights.append((right["rx"], y, math.pi / 2, alt))
-    for (x, y, h, alt) in flights:
-        scale = 1.0 + 0.45 * alt
-        rot = spr.rotate(-math.degrees(h), resample=Image.BICUBIC, expand=True)
-        w, hh = int(rot.width / 3 * scale), int(rot.height / 3 * scale)
-        small = rot.resize((max(1, w), max(1, hh)), Image.LANCZOS)
-        px, py = int(x - w / 2), int(y - hh / 2)
-        a = small.getchannel("A").point(lambda v: int(v * (1 - 0.55 * alt)))
-        sx, sy = px + int(6 + 70 * alt), py + int(8 + 90 * alt)
-        sm = small.getchannel("A").resize((int(w / scale), int(hh / scale)), Image.LANCZOS).point(lambda v: int(v * (1 - 0.6 * alt)))
-        _paste_mask(shadow, sm, sx + (w - sm.width) // 2, sy + (hh - sm.height) // 2)
-        _paste_rgba(body, small, px, py)
+    beam = Image.new("L", (CW, CH), 0)
+    frame = int(round(phase * 120))
+    main, corner = pad_layout(CW, CH, AX)
+    (lx, ly, _), (rx, ry, _) = main
+    helis = []
+    helis += heli_state(phase, (lx, ly), (CW * 0.62, -90), (CW * 0.42, CH + 90), 0.0)
+    helis += heli_state((phase + 0.5) % 1.0, (rx, ry), (CW * 0.38, CH + 90), (CW * 0.58, -90), math.pi)
+    # parked helicopters on the corner pads, rotors at rest
+    parked = [(x, y, 0.35 if i == 0 else math.pi + 0.35) for i, (x, y, r) in enumerate(corner)]
+    # draw lower ones first so higher helicopters sit on top
+    for (x, y, h, alt) in sorted(helis, key=lambda v: v[3]):
+        _heli_draw(body, shadow, glow, core, beam, x, y, h, alt, frame, CW, CH)
+    for (x, y, h) in parked:
+        global HELI
+        if HELI is None:
+            HELI = heli_sprite()
+        rot = HELI.rotate(-math.degrees(h), resample=Image.BICUBIC, expand=True)
+        small = rot.resize((rot.width * 2 // 3, rot.height * 2 // 3), Image.LANCZOS)
         ux, uy = math.cos(h), math.sin(h)
-        vx, vy = -uy, ux
-        Ls, Ss = L * scale, span * scale
-        wing = 17 * L / 58 * scale
-        for (lx, ly, col) in ((x + ux * (wing - Ls / 2) - vx * Ss / 2, y + uy * (wing - Ls / 2) - vy * Ss / 2, (255, 70, 60)),
-                              (x + ux * (wing - Ls / 2) + vx * Ss / 2, y + uy * (wing - Ls / 2) + vy * Ss / 2, (70, 255, 140)),
-                              (x - ux * Ls / 2, y - uy * Ls / 2, (255, 250, 235))):
-            dg.ellipse([lx - 7, ly - 7, lx + 7, ly + 7], fill=tuple(int(c * 0.45) for c in col))
-            dc.ellipse([lx - 1.4, ly - 1.4, lx + 1.4, ly + 1.4], fill=col)
-        nx, ny = x + ux * Ls / 2, y + uy * Ls / 2
-        bl, bw = 90, 26
-        dg.polygon([(nx - vx * 4, ny - vy * 4), (nx + vx * 4, ny + vy * 4),
-                    (nx + ux * bl + vx * bw, ny + uy * bl + vy * bw), (nx + ux * bl - vx * bw, ny + uy * bl - vy * bw)], fill=(70, 64, 46))
-    sh = np.asarray(shadow.filter(ImageFilter.GaussianBlur(5)), np.float32)[..., None] / 255.0
+        px, py = int(x - small.width / 2 - ux * 12), int(y - small.height / 2 - uy * 12)
+        _paste_mask(shadow, small.getchannel("A").point(lambda v: int(v * 0.8)), px + 5, py + 7)
+        _paste_rgba(body, small, px, py)
+        db = ImageDraw.Draw(body)
+        for k in range(2):
+            a = 0.6 + k * math.pi / 2
+            db.line([(x - 40 * math.cos(a), y - 40 * math.sin(a)), (x + 40 * math.cos(a), y + 40 * math.sin(a))],
+                    fill=(70, 72, 82, 255), width=3)
+    sh = np.asarray(shadow.filter(ImageFilter.GaussianBlur(4)), np.float32)[..., None] / 255.0
     b = np.asarray(body, np.float32) / 255.0
-    lights = (np.asarray(glow.filter(ImageFilter.GaussianBlur(6)), np.float32) / 255.0 +
-              np.asarray(core.filter(ImageFilter.GaussianBlur(0.5)), np.float32) / 255.0)
+    bm = np.asarray(beam.filter(ImageFilter.GaussianBlur(10)), np.float32)[..., None] / 255.0
+    lights = (np.asarray(glow.filter(ImageFilter.GaussianBlur(5)), np.float32) / 255.0 +
+              np.asarray(core.filter(ImageFilter.GaussianBlur(0.5)), np.float32) / 255.0 +
+              bm * np.array([1.0, 0.95, 0.82], np.float32) * 0.55)
     return sh, b, lights
 
 
