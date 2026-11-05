@@ -749,7 +749,7 @@ HELI = None
 
 
 def heli_sprite():
-    """Top-down helicopter body (no main rotor), facing +x, drawn at 3x."""
+    """Top-down utility helicopter (no main rotor), facing +x, drawn at 3x. Rotor hub at (46, 20)."""
     S = 3
     img = Image.new("RGBA", (80 * S, 40 * S), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -758,21 +758,31 @@ def heli_sprite():
     def P(x, y):
         return ((cx + x) * S, (cy + y) * S)
 
-    body, hi, dark, gold = (62, 70, 48, 255), (120, 130, 96, 255), (16, 18, 14, 255), (214, 172, 58, 255)
-    # skids
-    for sy in (-7.5, 7.5):
-        d.rounded_rectangle([*P(-11, sy - 0.8), *P(11, sy + 0.8)], radius=0.8 * S, fill=(60, 62, 70, 255))
-    # tail boom, fin and tail rotor
-    d.polygon([P(-8, -1.8), P(-36, -0.9), P(-36, 0.9), P(-8, 1.8)], fill=body)
-    d.rectangle([*P(-39, -5), *P(-35, 5)], fill=body)
-    d.ellipse([*P(-41, 3), *P(-33, 9)], fill=(120, 124, 136, 90))
-    # cabin
-    d.ellipse([*P(-12, -7), *P(14, 7)], fill=body)
-    d.ellipse([*P(-9, -5.4), *P(10, -1.5)], fill=hi)
-    d.ellipse([*P(4, -5.2), *P(14, 5.2)], fill=(30, 40, 58, 255))      # canopy glass
-    d.ellipse([*P(6, -3.6), *P(11, -1)], fill=(80, 96, 122, 255))
-    d.rectangle([*P(-10, -0.6), *P(3, 0.6)], fill=gold)                 # gold stripe
-    d.ellipse([*P(-3, -2.4), *P(2, 2.4)], fill=dark)                    # rotor hub
+    olive, olive_hi, olive_lo = (60, 66, 46, 255), (96, 104, 74, 255), (38, 42, 30, 255)
+    glass, line = (22, 30, 40, 255), (30, 33, 24, 255)
+    # tail boom, tapering
+    d.polygon([P(-9, -2.6), P(-34, -1.1), P(-34, 1.1), P(-9, 2.6)], fill=olive)
+    d.line([P(-9, 0), P(-34, 0)], fill=olive_lo, width=S)
+    # horizontal stabiliser and tail fin
+    d.rounded_rectangle([*P(-31, -6.5), *P(-28, 6.5)], radius=1 * S, fill=olive)
+    d.rounded_rectangle([*P(-37, -1.4), *P(-32, 1.4)], radius=1 * S, fill=olive_lo)
+    # tail rotor (blurred) on the right side of the fin
+    d.ellipse([*P(-38.5, 1.2), *P(-31.5, 4.2)], fill=(130, 134, 120, 70))
+    # fuselage: rounded body with a tapered nose
+    d.polygon([P(-11, -5.6), P(6, -6.2), P(13, -4.6), P(17, -1.8), P(17.8, 0), P(17, 1.8), P(13, 4.6), P(6, 6.2), P(-11, 5.6), P(-13, 0)],
+              fill=olive)
+    d.polygon([P(-10, -4.6), P(6, -5.2), P(12, -3.8), P(6, -2.4), P(-10, -2.2)], fill=olive_hi)   # moonlit side
+    # engine housing behind the rotor mast
+    d.rounded_rectangle([*P(-9, -3.2), *P(2, 3.2)], radius=1.5 * S, fill=olive_lo)
+    d.line([P(-9, 0), P(2, 0)], fill=line, width=S)
+    # cockpit glass
+    d.polygon([P(8, -4.6), P(13, -3.6), P(16.4, -1.2), P(16.4, 1.2), P(13, 3.6), P(8, 4.6), P(9.5, 0)], fill=glass)
+    d.line([P(9.5, 0), P(16.4, 0)], fill=olive_lo, width=S)
+    # panel lines and door
+    d.line([P(-4, -5.8), P(-4, 5.8)], fill=line, width=S)
+    d.line([P(4, -6.0), P(4, 6.0)], fill=line, width=S)
+    # rotor hub
+    d.ellipse([*P(-1.6, -1.6), *P(1.6, 1.6)], fill=(20, 22, 18, 255))
     return img
 
 
@@ -780,48 +790,49 @@ def _heli_draw(body, shadow, glow, core, beam, x, y, h, alt, frame, CW, CH):
     global HELI
     if HELI is None:
         HELI = heli_sprite()
-    scale = 2.0 * (1.0 + 0.3 * alt)
+    scale = 2.0 * (1.0 + 0.15 * alt)
     rot = HELI.rotate(-math.degrees(h), resample=Image.BICUBIC, expand=True)
     w, hh = int(rot.width / 3 * scale), int(rot.height / 3 * scale)
     small = rot.resize((max(1, w), max(1, hh)), Image.LANCZOS)
-    # hub sits 46px from the sprite's left edge in a 80px-wide sprite: offset the sprite so the hub is at (x, y)
     off = (46 - 40) * scale
     ux, uy = math.cos(h), math.sin(h)
     px, py = int(x - w / 2 - ux * off), int(y - hh / 2 - uy * off)
-    # shadow drifts away from the helicopter as it climbs
-    sdx, sdy = 6 + 60 * alt, 8 + 74 * alt
-    sm = small.getchannel("A").point(lambda v: int(v * (0.8 - 0.5 * alt)))
+    # shadow on the ground pulls away as it climbs
+    sdx, sdy = 5 + 46 * alt, 7 + 58 * alt
+    sm = small.getchannel("A").point(lambda v: int(v * (0.85 - 0.45 * alt)))
     _paste_mask(shadow, sm, int(px + sdx), int(py + sdy))
-    R = 22 * scale
+    R = 25 * scale / 2.0 * 2.0 / 2.0 * 2.0  # main rotor radius
     sd = ImageDraw.Draw(shadow)
-    sd.ellipse([x + sdx - R, y + sdy - R, x + sdx + R, y + sdy + R], fill=int(40 * (1 - 0.6 * alt)))
+    sd.ellipse([x + sdx - R, y + sdy - R, x + sdx + R, y + sdy + R], fill=int(26 * (1 - 0.5 * alt)))
     _paste_rgba(body, small, px, py)
-    # spinning main rotor: soft disc plus faint blades
-    disc = Image.new("RGBA", (int(R * 2 + 4), int(R * 2 + 4)), (0, 0, 0, 0))
+    # main rotor: four thin blades with a short motion smear, over a very faint disc
+    size = int(R * 2 + 6)
+    disc = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     dd = ImageDraw.Draw(disc)
-    c = disc.width / 2
-    dd.ellipse([c - R, c - R, c + R, c + R], fill=(150, 156, 170, 34), outline=(170, 176, 190, 60))
-    a0 = math.radians(frame * 41)
+    c = size / 2
+    dd.ellipse([c - R, c - R, c + R, c + R], fill=(150, 156, 140, 14))
+    a0 = math.radians(frame * 23)
     for k in range(4):
-        a = a0 + k * math.pi / 2
-        dd.line([(c, c), (c + R * math.cos(a), c + R * math.sin(a))], fill=(190, 194, 206, 70), width=2)
-    disc = disc.filter(ImageFilter.GaussianBlur(0.8))
+        for trail, alpha in ((0.0, 150), (-0.07, 70), (-0.14, 30)):
+            a = a0 + k * math.pi / 2 + trail
+            dd.line([(c, c), (c + R * math.cos(a), c + R * math.sin(a))], fill=(34, 36, 30, alpha), width=2)
     _paste_rgba(body, disc, int(x - c), int(y - c))
-    # steady navigation lights and a downward searchlight that sweeps gently
+    # steady, dim navigation lights
     vx, vy = -uy, ux
     dg, dc = ImageDraw.Draw(glow), ImageDraw.Draw(core)
-    for (lx, ly, col) in ((x - vx * 7 * scale, y - vy * 7 * scale, (255, 70, 60)),
-                          (x + vx * 7 * scale, y + vy * 7 * scale, (70, 255, 140)),
-                          (x - ux * 36 * scale, y - uy * 36 * scale, (255, 248, 230))):
-        dg.ellipse([lx - 6, ly - 6, lx + 6, ly + 6], fill=tuple(int(c_ * 0.45) for c_ in col))
-        dc.ellipse([lx - 1.2, ly - 1.2, lx + 1.2, ly + 1.2], fill=col)
-    if alt > 0.05:
-        sweep = 0.5 * math.sin(frame * 2 * math.pi / 60)
-        bx = x + sdx * 0.8 + ux * 30 + vx * 26 * sweep
-        by = y + sdy * 0.8 + uy * 30 + vy * 26 * sweep
-        rr = 26 + 14 * alt
-        db = ImageDraw.Draw(beam)
-        db.ellipse([bx - rr, by - rr * 0.85, bx + rr, by + rr * 0.85], fill=int(120 * alt))
+    for (lx, ly, col) in ((x - vx * 6 * scale, y - vy * 6 * scale, (230, 60, 50)),
+                          (x + vx * 6 * scale, y + vy * 6 * scale, (60, 220, 120)),
+                          (x - ux * 37 * scale, y - uy * 37 * scale, (230, 226, 210))):
+        dg.ellipse([lx - 4, ly - 4, lx + 4, ly + 4], fill=tuple(int(c_ * 0.3) for c_ in col))
+        dc.ellipse([lx - 1.0, ly - 1.0, lx + 1.0, ly + 1.0], fill=col)
+    if alt > 0.3:
+        bx = x + sdx * 0.9 + ux * 18
+        by = y + sdy * 0.9 + uy * 18
+        rr = 16 + 6 * alt
+        ImageDraw.Draw(beam).ellipse([bx - rr, by - rr * 0.8, bx + rr, by + rr * 0.8], fill=int(70 * alt))
+
+
+HELI = None
 
 
 def _ang(a):
@@ -830,35 +841,62 @@ def _ang(a):
 
 ROOFS = None
 SORTIES = None
+KOI_POS = None   # koi position on the canvas for each frame, set by main()
+
+
+def _flight_curve(pad0, pad1, reach, swing):
+    """Out over the pond and back: an arc from pad0 to pad1 that reaches `reach` px inward."""
+    sgn = 1 if pad0[0] < 600 else -1
+    c1 = (pad0[0] + sgn * reach, pad0[1] - swing)
+    c2 = (pad1[0] + sgn * reach, pad1[1] + swing)
+    P = np.array(bezier(pad0, c1, c2, pad1, 90))
+    cum = np.concatenate([[0], np.cumsum(np.hypot(*(P[1:] - P[:-1]).T))])
+    return P, cum
 
 
 def _build_sorties(CW, CH, AX, n):
-    """Seeded, irregular schedule of flights. Each starts and ends inside a hangar, so it loops."""
-    sides = base_layout(CW, CH, AX)
-    L, R = sides
+    """Two flights, one per side. Each start time and arc is drawn at random, then kept only if
+    the helicopter never passes over the koi (it crosses where the koi has already been)."""
+    L, R = base_layout(CW, CH, AX)
     r = random.Random(1986)
-    # (from side, from index, to side, to index): index 0 = top hangar/pad, 1 = bottom
-    plans = [(L, 0, R, 1), (R, 0, L, 1), (L, 1, R, 0), (R, 1, L, 0), (L, 0, L, 1), (R, 1, R, 0)]
-    starts = [0.00, 0.19, 0.41, 0.55, 0.73, 0.88]
+    plans = [(L, 0, 1), (R, 1, 0)]
     out = []
-    for (fs, fi, ts, ti), st in zip(plans, starts):
-        cross = fs is not ts
-        fly = int(r.uniform(56, 70) if cross else r.uniform(40, 50))
-        hg0, pad0 = fs["hangars"][fi], fs["pads"][fi]
-        hg1, pad1 = ts["hangars"][ti], ts["pads"][ti]
-        # curved flight over the pond, with a random swing
-        mx = CW / 2 + r.uniform(-120, 120)
-        my = CH / 2 + r.uniform(-150, 150)
-        c1 = (pad0[0] + (mx - pad0[0]) * 0.6, pad0[1] + (my - pad0[1]) * 0.9 + r.uniform(-60, 60))
-        c2 = (pad1[0] + (mx - pad1[0]) * 0.6, pad1[1] + (my - pad1[1]) * 0.9 + r.uniform(-60, 60))
-        flight = bezier(pad0, c1, c2, pad1, 80)
-        P = np.array(flight)
-        cum = np.concatenate([[0], np.cumsum(np.hypot(*(P[1:] - P[:-1]).T))])
-        out.append(dict(start=int(st * n + r.randint(0, 6)), taxi=r.randint(11, 15), lift=r.randint(9, 12), fly=fly,
-                        land=r.randint(9, 12), taxi_in=r.randint(11, 15),
-                        h0=(hg0["x"], hg0["y"]), d0=(hg0["x"], hg0["y"] + hg0["hh"] * hg0["door"]), p0=pad0,
-                        h1=(hg1["x"], hg1["y"]), d1=(hg1["x"], hg1["y"] + hg1["hh"] * hg1["door"]), p1=pad1,
-                        P=P, cum=cum))
+    for side, fi, ti in plans:
+        hg0, pad0 = side["hangars"][fi], side["pads"][fi]
+        hg1, pad1 = side["hangars"][ti], side["pads"][ti]
+        best, best_score = None, -1
+        for attempt in range(400):
+            so = dict(start=r.randrange(0, n), taxi=7, lift=11, fly=86, land=11, taxi_in=5,
+                      h0=(hg0["x"], hg0["y"]), d0=(hg0["x"], hg0["y"] + hg0["hh"] * hg0["door"]), p0=pad0,
+                      h1=(hg1["x"], hg1["y"]), d1=(hg1["x"], hg1["y"] + hg1["hh"] * hg1["door"]), p1=pad1)
+            so["P"], so["cum"] = _flight_curve(pad0, pad1, r.uniform(520, 700), r.uniform(-120, 120))
+            hv = so["P"][int(np.searchsorted(so["cum"], so["cum"][-1] * 0.5))]
+            so["hover"] = (float(hv[0]), float(hv[1]))
+            so["jump"] = so["taxi"] + so["lift"] + int(so["fly"] * 0.44)
+            pc = (CW / 2, CH / 2)
+            if math.hypot(hv[0] - pc[0], hv[1] - pc[1]) > 210:
+                continue
+            # clearance from the koi, and from the other helicopter, over every frame
+            score = 1e9
+            for f in range(n):
+                st = _sortie_state(so, f, n)
+                if st is None or st[3] < 0.2:
+                    continue
+                kx, ky = KOI_POS[f]
+                score = min(score, math.hypot(st[0] - kx, st[1] - ky))
+            for f in range(n):
+                for item in _diver_state(so, f, n, CW, CH):
+                    kx, ky = KOI_POS[f]
+                    score = min(score, math.hypot(item[1] - kx, item[2] - ky) + 60)
+                for other in out:
+                    o = _sortie_state(other, f, n)
+                    if o is not None and o[3] > 0.2:
+                        score = min(score, math.hypot(st[0] - o[0], st[1] - o[1]) + 40)
+            if score > best_score:
+                best, best_score = so, score
+            if score > 150:
+                break
+        out.append(best)
     return out
 
 
@@ -894,13 +932,20 @@ def _sortie_state(so, frame, n):
         return so["p0"][0], so["p0"][1], h0 + _ang(h1 - h0) * u, u
     if tau < t3:  # fly over the pond
         u = (tau - t2) / so["fly"]
-        u = 0.5 - 0.5 * math.cos(math.pi * u)
-        s_ = u * so["cum"][-1]
+        out_f, hover_f = 0.40, 0.22          # fly out, hover over the pond, fly back
+        if u < out_f:
+            p_ = 0.5 * ease(u / out_f)
+        elif u < out_f + hover_f:
+            p_ = 0.5
+        else:
+            p_ = 0.5 + 0.5 * ease((u - out_f - hover_f) / (1 - out_f - hover_f))
+        s_ = p_ * so["cum"][-1]
         i = int(np.clip(np.searchsorted(so["cum"], s_) - 1, 0, len(so["P"]) - 2))
         f = (s_ - so["cum"][i]) / max(so["cum"][i + 1] - so["cum"][i], 1e-6)
         x, y = so["P"][i] * (1 - f) + so["P"][i + 1] * f
         dx, dy = so["P"][i + 1] - so["P"][i]
-        return float(x), float(y), math.atan2(dy, dx), 1.0
+        alt = 1.0 - 0.25 * math.sin(math.pi * min(1, max(0, (u - out_f) / hover_f)))   # dips a little to drop
+        return float(x), float(y), math.atan2(dy, dx), alt
     if tau < t4:  # settle onto the pad, turning to face the hangar
         u = ease((tau - t3) / so["land"])
         P = so["P"]
@@ -913,6 +958,69 @@ def _sortie_state(so, frame, n):
         h = math.atan2(so["h1"][1] - so["p1"][1], so["h1"][0] - so["p1"][0])
         return x, y, h, 0.0
     return None
+
+
+def _diver_state(so, frame, n, CW, CH):
+    """Skydiver timeline after the jump: fall and shrink, splash, swim to the edge, fade out."""
+    d = (frame - so["start"] - so["jump"]) % n
+    hx, hy = so["hover"]
+    pcx, pcy = CW / 2, CH / 2
+    out = []
+    if d < 18:
+        u = d / 17
+        out.append(("fall", hx + 6 * u, hy + 10 * u, 1.0 - 0.62 * u, 1.0 - 0.15 * u))
+    elif d < 64:
+        e = d - 18
+        if e < 24:
+            out.append(("splash", hx + 6, hy + 10, e / 24, 1.0))
+        a = math.atan2(hy - pcy, hx - pcx)
+        sx, sy = hx + 6 + math.cos(a) * 2.6 * e, hy + 10 + math.sin(a) * 2.6 * e
+        fade = 1.0 if e < 26 else max(0.0, 1 - (e - 26) / 20)
+        out.append(("swim", sx, sy, a, fade, e))
+    return out
+
+
+def _draw_diver(body, item):
+    d = ImageDraw.Draw(body)
+    kind = item[0]
+    if kind == "fall":
+        _, x, y, sc, al = item
+        a = int(255 * al)
+        s = 7 * sc
+        olive, skin = (70, 78, 52, a), (196, 160, 120, a)
+        # arched freefall pose: arms and legs spread
+        for (dx, dy) in ((-1.1, -0.9), (1.1, -0.9), (-0.8, 1.3), (0.8, 1.3)):
+            d.line([(x, y), (x + dx * s, y + dy * s)], fill=olive, width=max(1, int(2.2 * sc)))
+        d.ellipse([x - 0.55 * s, y - 0.7 * s, x + 0.55 * s, y + 0.7 * s], fill=olive)
+        d.ellipse([x - 0.4 * s, y - 1.3 * s, x + 0.4 * s, y - 0.55 * s], fill=(20, 20, 22, a))
+    elif kind == "splash":
+        _, x, y, u, _ = item
+        for k in range(3):
+            v = u - k * 0.18
+            if v <= 0:
+                continue
+            r = 4 + v * 26
+            a = int(150 * (1 - v))
+            d.ellipse([x - r, y - r * 0.8, x + r, y + r * 0.8], outline=(220, 236, 240, a), width=2)
+        if u < 0.3:
+            d.ellipse([x - 4, y - 3, x + 4, y + 3], fill=(240, 248, 250, int(200 * (1 - u / 0.3))))
+    elif kind == "swim":
+        _, x, y, a_, fade, e = item
+        al = int(255 * fade)
+        ux, uy = math.cos(a_), math.sin(a_)
+        vx, vy = -uy, ux
+        stroke = math.sin(e * 0.7)
+        # wake
+        for k in (1, 2):
+            bx, by = x - ux * 7 * k, y - uy * 7 * k
+            d.line([(bx + vx * 3 * k, by + vy * 3 * k), (x - ux * 2, y - uy * 2), (bx - vx * 3 * k, by - vy * 3 * k)],
+                   fill=(200, 222, 230, int(80 * fade / k)), width=1)
+        d.ellipse([x - 2.2, y - 2.2, x + 2.2, y + 2.2], fill=(20, 20, 22, al))          # head
+        d.line([(x - ux * 2, y - uy * 2), (x - ux * 7, y - uy * 7)], fill=(70, 78, 52, al), width=2)
+        for side in (-1, 1):
+            reach = 4 + 3 * stroke * side
+            d.line([(x, y), (x + ux * reach + vx * 3.5 * side, y + uy * reach + vy * 3.5 * side)],
+                   fill=(196, 160, 120, al), width=1)
 
 
 def airport_planes(CW, CH, AX, phase):
@@ -928,6 +1036,9 @@ def airport_planes(CW, CH, AX, phase):
         lv[k] = dict(body=Image.new("RGBA", (CW, CH), (0, 0, 0, 0)), shadow=Image.new("L", (CW, CH), 0),
                      glow=Image.new("RGB", (CW, CH), (0, 0, 0)), core=Image.new("RGB", (CW, CH), (0, 0, 0)),
                      beam=Image.new("L", (CW, CH), 0))
+    for so in SORTIES:
+        for item in _diver_state(so, frame, n, CW, CH):
+            _draw_diver(lv["g"]["body"], item)
     states = [st for st in (_sortie_state(so, frame, n) for so in SORTIES) if st is not None]
     for (x, y, h, alt) in sorted(states, key=lambda v: v[3]):
         L = lv["f" if alt > 0.12 else "g"]
@@ -1033,6 +1144,8 @@ def main(src, dst):
         a = np.asarray(koi.convert("RGBA"))[..., 3] > 0
         ys, xs = np.nonzero(a)
         cents.append((xs.mean(), ys.mean()) if len(xs) else (W / 2, W / 2))
+    global KOI_POS
+    KOI_POS = [(OX + cx_ * SW / W, OY + cy_ * SW / W) for (cx_, cy_) in cents]
 
     def trail(i, phase):
         lay = Image.new("L", (W, W), 0)
