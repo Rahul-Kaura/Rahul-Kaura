@@ -741,9 +741,10 @@ def airport_lights(CW, CH, AX):
         for yy in range(30, CH, 60):
             lamp(side["cx"] + 6, yy, (80, 130, 255), g=4, r=1.0, k=0.5)
     x0, x1, by = bridge_geom(CW, CH)
-    for xx in np.linspace(x0 + 40, x1 - 40, 7):
-        for side in (-1, 1):
-            lamp(xx, by + side * (BRIDGE_W / 2 - 1.5), (255, 214, 140), g=14, r=1.4, k=0.3)
+    for k, xx in enumerate(bridge_posts(CW, CH)):
+        if k % 3 == 0:
+            for side in (-1, 1):
+                lamp(xx, by + side * (BRIDGE_W / 2 - 3), (255, 204, 120), g=12, r=1.6, k=0.32)
     g = np.asarray(glow.filter(ImageFilter.GaussianBlur(4)), np.float32) / 255.0
     c = np.asarray(core.filter(ImageFilter.GaussianBlur(0.5)), np.float32) / 255.0
     return g + c
@@ -849,46 +850,100 @@ SORTIES = None
 KOI_POS = None   # koi position on the canvas for each frame, set by main()
 
 
-BRIDGE_Y_OFF = -78     # bridge centreline relative to the pond centre
-BRIDGE_HALF = 345      # half length, ends rest on the rocks
-BRIDGE_W = 30
+BRIDGE_Y_OFF = 0       # bridge centreline relative to the pond centre
+BRIDGE_HALF = 340      # half length, ends rest on the rocks
+BRIDGE_W = 40
+ARCH_H = 30            # apparent height of the arch at its crest (drives shading and shadow)
 
 
 def bridge_geom(CW, CH):
     return CW / 2 - BRIDGE_HALF, CW / 2 + BRIDGE_HALF, CH / 2 + BRIDGE_Y_OFF
 
 
+def bridge_posts(CW, CH):
+    x0, x1, _ = bridge_geom(CW, CH)
+    return list(np.linspace(x0 + 22, x1 - 22, 13))
+
+
 def bridge_layer(CW, CH):
-    """Stone footbridge across the pond, as an RGBA overlay plus its shadow on the water."""
+    """Arched wooden garden bridge, rendered top-down with moonlight shading, as RGBA + shadow on the water."""
     S = 2
-    x0, x1, y = bridge_geom(CW, CH)
+    x0, x1, by = bridge_geom(CW, CH)
+    cx = (x0 + x1) / 2
+    hl = (x1 - x0) / 2
     hw = BRIDGE_W / 2
-    lay = Image.new("RGBA", (CW * S, CH * S), (0, 0, 0, 0))
-    sh = Image.new("L", (CW * S, CH * S), 0)
-    d, ds = ImageDraw.Draw(lay), ImageDraw.Draw(sh)
-    ds.rectangle([(x0 + 20) * S, (y - hw + 14) * S, (x1 - 20) * S, (y + hw + 18) * S], fill=170)
-    # gentle arch: deck widens slightly at the ends
-    d.polygon([((x0) * S, (y - hw - 4) * S), ((x0 + 60) * S, (y - hw) * S), ((x1 - 60) * S, (y - hw) * S), ((x1) * S, (y - hw - 4) * S),
-               ((x1) * S, (y + hw + 4) * S), ((x1 - 60) * S, (y + hw) * S), ((x0 + 60) * S, (y + hw) * S), ((x0) * S, (y + hw + 4) * S)],
-              fill=(58, 58, 62, 255))
-    # paving stones
-    for xx in range(int(x0 + 4), int(x1 - 4), 9):
-        d.line([(xx * S, (y - hw + 3) * S), (xx * S, (y + hw - 3) * S)], fill=(46, 46, 50, 255), width=S)
-    d.line([((x0 + 6) * S, y * S), ((x1 - 6) * S, y * S)], fill=(50, 50, 54, 255), width=S)
-    # parapets with gold trim on the moonlit edge
+    W2, H2 = CW * S, CH * S
+    X = (np.arange(W2, dtype=np.float32) + 0.5) / S
+    Y = (np.arange(H2, dtype=np.float32) + 0.5) / S
+    XX, YY = np.meshgrid(X, Y)
+    u = np.clip((XX - cx) / hl, -1, 1)
+    H = ARCH_H * (1 - u ** 2)                                  # deck height along the span
+    slope = -2 * ARCH_H * u / hl                               # dH/dx
+    on_span = (XX >= x0) & (XX <= x1)
+    hwx = hw * (1 + 0.14 * (1 - u ** 2))                     # the crest is nearer the viewer, so it reads wider
+    deck = on_span & (np.abs(YY - by) <= hwx - 3)
+    # moonlight from the upper right: the rising left half is in shade, the falling right half lit
+    lam = np.clip(0.8 - slope * 4.2, 0.4, 1.35)
+    # planks across the deck with per-plank tone and fine grain
+    plank_w = 7.0
+    idx = np.floor((XX - x0) / plank_w).astype(np.int32)
+    r = np.random.default_rng(12)
+    tones = r.uniform(0.82, 1.12, size=int(BRIDGE_HALF * 2 / plank_w) + 4).astype(np.float32)
+    tone = tones[np.clip(idx, 0, len(tones) - 1)]
+    grain = 0.92 + 0.08 * np.sin(YY * 1.7 + idx * 2.3 + np.sin(XX * 0.9) * 1.5)
+    gap = (np.mod(XX - x0, plank_w) < 0.9)
+    wood = np.array([86, 62, 42], np.float32) / 255.0
+    col = wood[None, None, :] * (tone * grain * lam)[..., None]
+    col = np.where(gap[..., None], col * 0.45, col)
+    # edge beams (fascia) a little darker
+    fascia = on_span & (np.abs(YY - by) > hwx - 6) & (np.abs(YY - by) <= hwx - 3)
+    col = np.where(fascia[..., None], col * 0.7, col)
+    rgba = np.zeros((H2, W2, 4), np.float32)
+    rgba[..., :3] = col
+    rgba[..., 3] = deck.astype(np.float32)
+    # rail shadows falling onto the deck (light from upper right -> shadow toward lower left)
     for side in (-1, 1):
-        yy = y + side * (hw - 1.5)
-        d.line([((x0 + 2) * S, yy * S), ((x1 - 2) * S, yy * S)], fill=(92, 92, 98, 255), width=3 * S)
-        d.line([((x0 + 2) * S, (yy - side * 2) * S), ((x1 - 2) * S, (yy - side * 2) * S)],
-               fill=(150, 118, 40, 255) if side < 0 else (40, 40, 44, 255), width=S)
-    # lamp posts
-    for xx in np.linspace(x0 + 40, x1 - 40, 7):
+        ry = by + side * (hwx - 3)
+        rs = on_span & (YY > ry) & (YY < ry + 4) & deck
+        rgba[..., :3] = np.where(rs[..., None], rgba[..., :3] * 0.6, rgba[..., :3])
+    # handrails: black lacquer with a moonlit top edge
+    for side in (-1, 1):
+        ry = by + side * (hwx - 3)
+        rail = on_span & (np.abs(YY - ry) <= 2.2)
+        hi = on_span & (YY >= ry - 2.2) & (YY <= ry - 1.0)
+        base = np.array([22, 20, 24], np.float32) / 255.0
+        rc = base[None, None, :] * np.clip(lam, 0.7, 1.3)[..., None]
+        rgba[..., :3] = np.where(rail[..., None], rc, rgba[..., :3])
+        rgba[..., :3] = np.where(hi[..., None], np.array([70, 66, 72], np.float32) / 255.0 * np.clip(lam, 0.7, 1.3)[..., None], rgba[..., :3])
+        rgba[..., 3] = np.maximum(rgba[..., 3], rail.astype(np.float32))
+    img = Image.fromarray(np.clip(rgba * 255, 0, 255).astype(np.uint8), "RGBA")
+    d = ImageDraw.Draw(img)
+    # stone footings at both ends
+    for ex, sgn in ((x0, -1), (x1, 1)):
+        for k in range(3):
+            bx0 = ex + sgn * (k * 9) - (9 if sgn > 0 else 0)
+            g = 96 - k * 10
+            d.rectangle([(min(bx0, bx0 + 9) - (0 if sgn > 0 else 0)) * S, (by - hw - 4 + k) * S, (max(bx0, bx0 + 9)) * S, (by + hw + 4 - k) * S],
+                        fill=(g, g, g + 4, 255), outline=(40, 40, 44, 255))
+    # posts with gold caps
+    for px in bridge_posts(CW, CH):
+        uu = (px - cx) / hl
+        lamp = 0.78 + 2 * ARCH_H * uu / hl * 2.6
+        hwp = hw * (1 + 0.14 * (1 - uu ** 2))
         for side in (-1, 1):
-            d.ellipse([(xx - 2.6) * S, (y + side * (hw - 1.5) - 2.6) * S, (xx + 2.6) * S, (y + side * (hw - 1.5) + 2.6) * S],
-                      fill=(26, 26, 30, 255))
-    lay = lay.resize((CW, CH), Image.LANCZOS)
-    sh = sh.filter(ImageFilter.GaussianBlur(10 * S)).resize((CW, CH), Image.LANCZOS)
-    return lay, sh
+            py = by + side * (hwp - 3)
+            d.rectangle([(px - 3.2) * S, (py - 3.2) * S, (px + 3.2) * S, (py + 3.2) * S], fill=(16, 14, 18, 255))
+            d.ellipse([(px - 2.2) * S, (py - 2.2) * S, (px + 2.2) * S, (py + 2.2) * S], fill=(176, 136, 46, 255))
+            d.ellipse([(px - 0.6) * S, (py - 1.6) * S, (px + 1.2) * S, (py - 0.2) * S], fill=(255, 226, 140, 255))
+    # shadow on the water: offset grows with the arch height
+    sh = np.zeros((H2, W2), np.float32)
+    off = 10 + 1.2 * H
+    shadow_band = on_span & (np.abs(YY - off - by) <= hwx)
+    sh = shadow_band.astype(np.float32) * 0.95
+    sh_img = Image.fromarray((sh * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(5 * S))
+    img = img.resize((CW, CH), Image.LANCZOS)
+    sh_img = sh_img.resize((CW, CH), Image.LANCZOS)
+    return img, sh_img
 
 
 def _flight_curve(pad0, pad1, reach, swing):
@@ -918,7 +973,7 @@ def _build_sorties(CW, CH, AX, n):
                       h1=(hg1["x"], hg1["y"]), d1=(hg1["x"], hg1["y"] + hg1["hh"] * hg1["door"]), p1=pad1)
             bx0, bx1, by = bridge_geom(CW, CH)
             sgn = 1 if pad0[0] < CW / 2 else -1
-            hx = CW / 2 + sgn * r.uniform(-170, 30)          # somewhere along the bridge, nearer its own side
+            hx = CW / 2 - sgn * r.uniform(150, 235)          # over the bridge, out toward its own end
             hv = (hx, by)
             sw = r.uniform(40, 140)
             a = bezier(pad0, (pad0[0] + sgn * sw, pad0[1] - 90), (hx - sgn * 160, by - r.uniform(-60, 60)), hv, 50)
@@ -1023,8 +1078,7 @@ def _diver_state(so, frame, n, CW, CH):
     side = -1                                             # head for the north rail and rim (closest)
     rail_y = hy + side * (BRIDGE_W / 2 + 2)
     up = -math.pi / 2
-    tilt = 0.35 if hx > pcx else -0.35                   # angle a little toward their own side
-    a = up + tilt
+    a = math.atan2(rail_y - 16 - pcy, hx - pcx)          # swim straight out to the nearest rim
     ux, uy = math.cos(a), math.sin(a)
     out = []
     if d < 8:
